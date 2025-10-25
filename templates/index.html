@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ایجنت هوشمند دایرکت اینستاگرام</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <!-- نوار کناری -->
+        <aside class="sidebar">
+            <div class="logo">
+                <i class="fab fa-instagram"></i>
+                <h2>ایجنت هوشمند</h2>
+            </div>
+
+            <nav class="menu">
+                <button class="menu-item active" data-page="dashboard">
+                    <i class="fas fa-home"></i>
+                    داشبورد
+                </button>
+                <button class="menu-item" data-page="messages">
+                    <i class="fas fa-comments"></i>
+                    دایرکت‌ها
+                    <span class="badge" id="unread-count">0</span>
+                </button>
+                <button class="menu-item" data-page="training">
+                    <i class="fas fa-brain"></i>
+                    آموزش ایجنت
+                </button>
+                <button class="menu-item" data-page="settings">
+                    <i class="fas fa-cog"></i>
+                    تنظیمات
+                </button>
+                <button class="menu-item" data-page="statistics">
+                    <i class="fas fa-chart-bar"></i>
+                    آمار
+                </button>
+            </nav>
+
+            <div class="user-info" id="user-info">
+                <button class="btn btn-primary" id="login-btn">
+                    <i class="fas fa-sign-in-alt"></i>
+                    ورود به اینستاگرام
+                </button>
+            </div>
+        </aside>
+
+        <!-- محتوای اصلی -->
+        <main class="main-content">
+            <!-- صفحه داشبورد -->
+            <div class="page active" id="dashboard-page">
+                <header class="page-header">
+                    <h1>داشبورد</h1>
+                    <p>خوش آمدید به پنل مدیریت ایجنت هوشمند دایرکت اینستاگرام</p>
+                </header>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                            <i class="fas fa-comments"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3 id="total-conversations">0</h3>
+                            <p>کل مکالمات</p>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                            <i class="fas fa-envelope"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3 id="total-messages">0</h3>
+                            <p>کل پیام‌ها</p>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);">
+                            <i class="fas fa-calendar-day"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3 id="today-conversations">0</h3>
+                            <p>مکالمات امروز</p>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);">
+                            <i class="fas fa-robot"></i>
+                        </div>
+                        <div class="stat-content">
+                            <h3 id="auto-reply-status">غیرفعال</h3>
+                            <p>وضعیت پاسخگویی خودکار</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="info-box">
+                    <h3>📱 نحوه استفاده</h3>
+                    <ol>
+                        <li>با کلیک روی دکمه "ورود به اینستاگرام" وارد اکانت خود شوید</li>
+                        <li>در بخش "آموزش ایجنت" اطلاعات محصول و نحوه فروش را وارد کنید</li>
+                        <li>در بخش "دایرکت‌ها" پیام‌های دریافتی را مشاهده و پاسخ دهید</li>
+                        <li>ایجنت به صورت هوشمند با هدف فروش در 5 مرحله پاسخ می‌دهد</li>
+                        <li>در بخش "آمار" پیشرفت خود را مشاهده کنید</li>
+                    </ol>
+                </div>
+            </div>
+
+            <!-- صفحه دایرکت‌ها -->
+            <div class="page" id="messages-page">
+                <header class="page-header">
+                    <h1>دایرکت‌ها</h1>
+                    <button class="btn btn-primary" id="refresh-messages">
+                        <i class="fas fa-sync-alt"></i>
+                        بروزرسانی
+                    </button>
+                </header>
+
+                <div class="messages-container">
+                    <div class="messages-list">
+                        <div id="messages-list-content">
+                            <p class="empty-state">لطفاً ابتدا وارد شوید</p>
+                        </div>
+                    </div>
+
+                    <div class="conversation-view" id="conversation-view">
+                        <div class="empty-state">
+                            <i class="fas fa-comments"></i>
+                            <p>یک مکالمه را انتخاب کنید</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- صفحه آموزش ایجنت -->
+            <div class="page" id="training-page">
+                <header class="page-header">
+                    <h1>آموزش ایجنت</h1>
+                    <p>اطلاعات محصول و نحوه فروش را به ایجنت یاد دهید</p>
+                </header>
+
+                <div class="training-container">
+                    <div class="training-form">
+                        <h3>افزودن اطلاعات آموزشی</h3>
+
+                        <div class="form-group">
+                            <label>نوع آموزش</label>
+                            <div class="radio-group">
+                                <label>
+                                    <input type="radio" name="training-type" value="text" checked>
+                                    <span>متن</span>
+                                </label>
+                                <label>
+                                    <input type="radio" name="training-type" value="voice">
+                                    <span>صدا</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="form-group" id="text-training-group">
+                            <label for="training-text">متن آموزشی</label>
+                            <textarea id="training-text" rows="6" placeholder="مثال:
+محصول ما یک دوره آنلاین آموزش برنامه‌نویسی است.
+قیمت: 500 هزار تومان
+مدت: 3 ماه
+شامل: ویدیوها، پروژه‌های عملی، و پشتیبانی
+مناسب برای: مبتدیان و علاقه‌مندان به یادگیری کد نویسی"></textarea>
+                        </div>
+
+                        <div class="form-group hidden" id="voice-training-group">
+                            <label for="training-voice">فایل صوتی</label>
+                            <input type="file" id="training-voice" accept="audio/*">
+                            <p class="hint">فایل صوتی خود را آپلود کنید (حداکثر 10MB)</p>
+                        </div>
+
+                        <button class="btn btn-primary" id="save-training">
+                            <i class="fas fa-save"></i>
+                            ذخیره اطلاعات آموزشی
+                        </button>
+                    </div>
+
+                    <div class="training-list">
+                        <h3>اطلاعات آموزشی ذخیره شده</h3>
+                        <div id="training-items">
+                            <p class="empty-state">هنوز اطلاعاتی ذخیره نشده</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- صفحه تنظیمات -->
+            <div class="page" id="settings-page">
+                <header class="page-header">
+                    <h1>تنظیمات</h1>
+                </header>
+
+                <div class="settings-container">
+                    <div class="setting-item">
+                        <div>
+                            <h3>پاسخگویی خودکار</h3>
+                            <p>فعال‌سازی پاسخ خودکار به دایرکت‌ها</p>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" id="auto-reply-toggle">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="setting-item">
+                        <div>
+                            <h3>تعداد مراحل فروش</h3>
+                            <p>حداکثر تعداد مراحل گفتگو برای فروش</p>
+                        </div>
+                        <input type="number" id="max-stages" min="3" max="10" value="5" class="setting-input">
+                    </div>
+
+                    <div class="setting-item">
+                        <div>
+                            <h3>تاخیر پاسخ (ثانیه)</h3>
+                            <p>زمان تاخیر قبل از ارسال پاسخ (طبیعی‌تر به نظر می‌رسد)</p>
+                        </div>
+                        <input type="number" id="response-delay" min="0" max="30" value="3" class="setting-input">
+                    </div>
+
+                    <button class="btn btn-primary" id="save-settings">
+                        <i class="fas fa-save"></i>
+                        ذخیره تنظیمات
+                    </button>
+                </div>
+            </div>
+
+            <!-- صفحه آمار -->
+            <div class="page" id="statistics-page">
+                <header class="page-header">
+                    <h1>آمار و گزارش‌ها</h1>
+                </header>
+
+                <div class="stats-container">
+                    <div class="chart-card">
+                        <h3>توزیع مراحل مکالمه</h3>
+                        <div id="stages-chart">
+                            <div class="stage-bar">
+                                <span>مرحله 1</span>
+                                <div class="bar"><div class="bar-fill" style="width: 0%"></div></div>
+                                <span class="count">0</span>
+                            </div>
+                            <div class="stage-bar">
+                                <span>مرحله 2</span>
+                                <div class="bar"><div class="bar-fill" style="width: 0%"></div></div>
+                                <span class="count">0</span>
+                            </div>
+                            <div class="stage-bar">
+                                <span>مرحله 3</span>
+                                <div class="bar"><div class="bar-fill" style="width: 0%"></div></div>
+                                <span class="count">0</span>
+                            </div>
+                            <div class="stage-bar">
+                                <span>مرحله 4</span>
+                                <div class="bar"><div class="bar-fill" style="width: 0%"></div></div>
+                                <span class="count">0</span>
+                            </div>
+                            <div class="stage-bar">
+                                <span>مرحله 5</span>
+                                <div class="bar"><div class="bar-fill" style="width: 0%"></div></div>
+                                <span class="count">0</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- مودال ورود -->
+    <div class="modal" id="login-modal">
+        <div class="modal-content">
+            <h2>ورود به اینستاگرام</h2>
+            <p class="warning">⚠️ هشدار: استفاده از یوزرنیم و پسورد ممکن است نقض قوانین Instagram باشد</p>
+
+            <div class="form-group">
+                <label for="username">یوزرنیم</label>
+                <input type="text" id="username" placeholder="username">
+            </div>
+
+            <div class="form-group">
+                <label for="password">پسورد</label>
+                <input type="password" id="password" placeholder="password">
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancel-login">انصراف</button>
+                <button class="btn btn-primary" id="submit-login">ورود</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
