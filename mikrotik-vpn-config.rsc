@@ -215,6 +215,17 @@ add action=drop \
     chain=input \
     comment="Drop all other input"
 
+# Output chain rules (important for VPN server responses)
+add action=accept \
+    chain=output \
+    out-interface=wireguard-vpn \
+    comment="Allow output to VPN interface"
+
+add action=accept \
+    chain=output \
+    connection-state=established,related \
+    comment="Allow output established/related"
+
 # Forward chain rules
 add action=accept \
     chain=forward \
@@ -241,6 +252,12 @@ add action=accept \
     out-interface=wireguard-vpn \
     connection-state=established,related \
     comment="Internet to VPN (return traffic)"
+
+# Allow all traffic to VPN (important for return packets)
+add action=accept \
+    chain=forward \
+    out-interface=wireguard-vpn \
+    comment="Allow all to VPN interface"
 
 # Drop invalid connections
 add action=drop \
@@ -377,10 +394,13 @@ add action=accept chain=input protocol=icmp comment="Allow ICMP"
 add action=accept chain=input in-interface=bridge-lan comment="Allow from LAN"
 add action=accept chain=input in-interface=wireguard-vpn comment="Allow from VPN"
 add action=drop chain=input comment="Drop all other input"
+add action=accept chain=output out-interface=wireguard-vpn comment="Allow output to VPN"
+add action=accept chain=output connection-state=established,related comment="Allow output established/related"
 add action=accept chain=forward connection-state=established,related comment="Accept established/related forward"
 add action=accept chain=forward in-interface=wireguard-vpn out-interface=ether5-internet comment="VPN to Internet"
 add action=accept chain=forward in-interface=bridge-lan comment="Allow LAN to WAN"
-add action=accept chain=forward in-interface=ether5-internet out-interface=wireguard-vpn connection-state=established,related comment="Internet to VPN (return traffic)"
+add action=accept chain=forward in-interface=ether5-internet out-interface=wireguard-vpn connection-state=established,related comment="Internet to VPN return"
+add action=accept chain=forward out-interface=wireguard-vpn comment="Allow all to VPN"
 add action=drop chain=forward connection-state=invalid comment="Drop invalid"
 add action=drop chain=forward comment="Drop all other forward"
 
