@@ -66,6 +66,7 @@
 - **client1.conf**: فایل کانفیگ کلاینت اول (برای import دستی)
 - **client1-qrcode.png**: QR Code کلاینت اول (برای اسکن با موبایل)
 - **CLIENT-SETUP.md**: راهنمای کامل راه‌اندازی کلاینت
+- **CLIENT-CONFIG-GUIDE.md**: راهنمای جامع کانفیگ کلاینت (همه پلتفرم‌ها)
 
 ### راهنماها و عیب‌یابی
 - **TROUBLESHOOTING.md**: راهنمای کامل رفع مشکل "اتصال برقرار اما receive صفر"
@@ -111,6 +112,33 @@
    ```
 
 برای جزئیات بیشتر، فایل [INSTALLATION-GUIDE.md](INSTALLATION-GUIDE.md) را مطالعه کنید.
+
+## راه‌اندازی سریع کلاینت
+
+### روش 1: استفاده از QR Code (موبایل) 📱
+
+1. اپلیکیشن WireGuard را نصب کنید (Android/iOS)
+2. روی **+** بزنید
+3. گزینه **"Scan from QR code"** را انتخاب کنید
+4. فایل `client1-qrcode.png` را اسکن کنید
+5. نام بدهید و سوییچ را فعال کنید
+6. ✅ آماده!
+
+### روش 2: استفاده از فایل کانفیگ (دسکتاپ) 💻
+
+**Windows/macOS:**
+1. WireGuard را نصب کنید
+2. **Import tunnel from file** → فایل `client1.conf`
+3. **Activate** کنید
+
+**Linux:**
+```bash
+sudo apt install wireguard
+sudo cp client1.conf /etc/wireguard/wg0.conf
+sudo wg-quick up wg0
+```
+
+برای راهنمای کامل، فایل [CLIENT-CONFIG-GUIDE.md](CLIENT-CONFIG-GUIDE.md) را مطالعه کنید.
 
 ## ویژگی‌های کلیدی
 
