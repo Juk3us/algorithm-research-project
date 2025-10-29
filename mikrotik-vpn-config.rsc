@@ -113,7 +113,7 @@ add address=192.168.100.0/24 \
 add listen-port=13231 \
     mtu=1420 \
     name=wireguard-vpn \
-    private-key="YOUR_SERVER_PRIVATE_KEY_HERE" \
+    private-key="PdsXoO5nDVQ3paH1vV7STq7yGihe6g5Y0JvxMdt5ka4=" \
     comment="WireGuard VPN Server"
 
 # Add IP address to WireGuard interface
