@@ -72,7 +72,7 @@
 - **آدرس سرور**: 2.187.7.240:13231
 - **شبکه VPN**: 192.168.200.0/24
 - **IP سرور**: 192.168.200.1/24
-- **Server Public Key**: `tw9L9nBpkI2T5Uhtx3T3H4TALSA+5TE1EaWMdYFl7D4=`
+- **Server Public Key**: `OkMrWI423O6h0Fgvg40RRvzWBLv1bC4CEfNi9INlph0=`
 - **Client 1 Public Key**: `L1MLvxKfg0zzA6JYQbCbhYtZm/QFadlllHbYRqlD5SM=`
 
 ## مراحل نصب
@@ -160,7 +160,7 @@ Address = 192.168.200.2/24
 DNS = 8.8.8.8, 1.1.1.1
 
 [Peer]
-PublicKey = tw9L9nBpkI2T5Uhtx3T3H4TALSA+5TE1EaWMdYFl7D4=
+PublicKey = OkMrWI423O6h0Fgvg40RRvzWBLv1bC4CEfNi9INlph0=
 Endpoint = 2.187.7.240:13231
 AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25

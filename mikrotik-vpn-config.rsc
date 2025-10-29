@@ -104,16 +104,16 @@ add address=192.168.100.0/24 \
 # 7. WIREGUARD VPN SERVER CONFIGURATION
 # =====================================================
 
-# Generate private key for server (you need to replace this with actual private key)
-# The public key provided: tw9L9nBpkI2T5Uhtx3T3H4TALSA+5TE1EaWMdYFl7D4=
-# You must have the corresponding private key
+# WireGuard Server Keys:
+# Private key: KEODtvSQS68bLhQLdJ8jmwdW7vxwCroQuVVv3hAzy3k=
+# Public key: OkMrWI423O6h0Fgvg40RRvzWBLv1bC4CEfNi9INlph0=
 
 # Create WireGuard interface
 /interface wireguard
 add listen-port=13231 \
     mtu=1420 \
     name=wireguard-vpn \
-    private-key="PdsXoO5nDVQ3paH1vV7STq7yGihe6g5Y0JvxMdt5ka4=" \
+    private-key="KEODtvSQS68bLhQLdJ8jmwdW7vxwCroQuVVv3hAzy3k=" \
     comment="WireGuard VPN Server"
 
 # Add IP address to WireGuard interface
@@ -295,7 +295,7 @@ add topics=firewall action=memory
 #
 # IMPORTANT NOTES:
 # 1. Replace "YOUR_SERVER_PRIVATE_KEY_HERE" with your actual WireGuard private key
-# 2. Server public key: tw9L9nBpkI2T5Uhtx3T3H4TALSA+5TE1EaWMdYFl7D4=
+# 2. Server public key: OkMrWI423O6h0Fgvg40RRvzWBLv1bC4CEfNi9INlph0=
 # 3. Client 1 public key: L1MLvxKfg0zzA6JYQbCbhYtZm/QFadlllHbYRqlD5SM=
 # 4. Test connectivity after applying configuration
 # 5. Verify routing with: /ip route print
