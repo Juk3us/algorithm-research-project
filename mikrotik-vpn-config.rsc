@@ -308,3 +308,98 @@ add topics=firewall action=memory
 # - Failover: Port 1 (distance=1) -> Port 2 (distance=2) -> Port 5 (distance=3)
 #
 # =====================================================
+
+
+# =====================================================
+# QUICK COPY/PASTE CONFIGURATION
+# =====================================================
+# Complete configuration without comments - ready to copy/paste
+# =====================================================
+
+/interface ethernet
+set [ find default-name=ether1 ] name=ether1-wan-radio comment="WAN: Radio Link to Intranet"
+set [ find default-name=ether2 ] name=ether2-wan-vdsl comment="WAN Backup: VDSL to Intranet"
+set [ find default-name=ether3 ] name=ether3-lan comment="LAN Port"
+set [ find default-name=ether4 ] name=ether4-lan comment="LAN Port"
+set [ find default-name=ether5 ] name=ether5-internet comment="Internet Connection"
+
+/interface vlan
+add interface=ether1-wan-radio name=vlan1787 vlan-id=1787 comment="VLAN for PPPoE"
+
+/interface pppoe-client
+add add-default-route=yes default-route-distance=1 disabled=no interface=vlan1787 name=pppoe-intranet user=1331626494 password=351598 use-peer-dns=yes keepalive-timeout=60 comment="Primary WAN: Intranet via Radio Link"
+
+/ip dhcp-client
+add disabled=no interface=ether2-wan-vdsl add-default-route=yes default-route-distance=2 use-peer-dns=no comment="Backup WAN: VDSL Intranet"
+add disabled=no interface=ether5-internet add-default-route=yes default-route-distance=3 use-peer-dns=yes comment="Internet Connection"
+
+/interface bridge
+add name=bridge-lan comment="LAN Bridge"
+
+/interface bridge port
+add bridge=bridge-lan interface=ether3-lan
+add bridge=bridge-lan interface=ether4-lan
+
+/ip address
+add address=192.168.100.1/24 interface=bridge-lan comment="LAN Network"
+
+/ip pool
+add name=lan-pool ranges=192.168.100.10-192.168.100.254
+
+/ip dhcp-server
+add address-pool=lan-pool disabled=no interface=bridge-lan name=dhcp-lan
+
+/ip dhcp-server network
+add address=192.168.100.0/24 gateway=192.168.100.1 dns-server=192.168.100.1,8.8.8.8,1.1.1.1 comment="LAN DHCP Network"
+
+/interface wireguard
+add listen-port=13231 mtu=1420 name=wireguard-vpn private-key="KEODtvSQS68bLhQLdJ8jmwdW7vxwCroQuVVv3hAzy3k=" comment="WireGuard VPN Server"
+
+/ip address
+add address=192.168.200.1/24 interface=wireguard-vpn comment="WireGuard Server IP"
+
+/interface wireguard peers
+add allowed-address=192.168.200.2/32 interface=wireguard-vpn public-key="L1MLvxKfg0zzA6JYQbCbhYtZm/QFadlllHbYRqlD5SM=" comment="WireGuard Client 1"
+
+/ip firewall nat
+add action=masquerade chain=srcnat out-interface=ether5-internet comment="NAT: LAN to Internet"
+add action=masquerade chain=srcnat src-address=192.168.200.0/24 out-interface=ether5-internet comment="NAT: VPN Clients to Internet"
+add action=masquerade chain=srcnat out-interface=pppoe-intranet comment="NAT: Through PPPoE"
+add action=masquerade chain=srcnat out-interface=ether2-wan-vdsl comment="NAT: Through VDSL Backup"
+
+/ip route
+add dst-address=0.0.0.0/0 gateway=ether5-internet distance=3 comment="Default route via Internet"
+
+/ip firewall filter
+add action=accept chain=input connection-state=established,related comment="Accept established/related"
+add action=accept chain=input protocol=udp dst-port=13231 comment="Allow WireGuard VPN"
+add action=accept chain=input protocol=icmp comment="Allow ICMP"
+add action=accept chain=input in-interface=bridge-lan comment="Allow from LAN"
+add action=accept chain=input in-interface=wireguard-vpn comment="Allow from VPN"
+add action=drop chain=input comment="Drop all other input"
+add action=accept chain=forward connection-state=established,related comment="Accept established/related forward"
+add action=accept chain=forward in-interface=wireguard-vpn out-interface=ether5-internet comment="VPN to Internet"
+add action=accept chain=forward in-interface=bridge-lan comment="Allow LAN to WAN"
+add action=accept chain=forward in-interface=ether5-internet out-interface=wireguard-vpn connection-state=established,related comment="Internet to VPN (return traffic)"
+add action=drop chain=forward connection-state=invalid comment="Drop invalid"
+add action=drop chain=forward comment="Drop all other forward"
+
+/ip dns
+set allow-remote-requests=yes servers=8.8.8.8,1.1.1.1
+
+/ip service
+set telnet disabled=yes
+set ftp disabled=yes
+set www disabled=no
+set api disabled=yes
+set api-ssl disabled=yes
+set ssh disabled=no port=22222
+set winbox disabled=no port=8291
+
+/system logging
+add topics=wireguard action=memory
+add topics=firewall action=memory
+
+# =====================================================
+# END OF QUICK COPY/PASTE CONFIGURATION
+# =====================================================
