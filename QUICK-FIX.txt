@@ -1,0 +1,7 @@
+# کپی و پیست کنید در Terminal MikroTik:
+
+/ip firewall filter add action=accept chain=output out-interface=wireguard-vpn place-before=0 comment="Allow output to VPN"
+/ip firewall filter add action=accept chain=output connection-state=established,related place-before=0 comment="Allow output established"
+/ip firewall filter add action=accept chain=forward out-interface=wireguard-vpn place-before=0 comment="Allow all to VPN"
+/ping 192.168.200.2 count=5
+/interface wireguard peers print stats
