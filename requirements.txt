@@ -1,0 +1,33 @@
+# کتابخانه‌های مورد نیاز برای ربات معاملاتی
+# Required Libraries for Trading Bot
+
+# صرافی و معاملات
+ccxt>=4.0.0
+
+# پردازش داده
+pandas>=2.0.0
+numpy>=1.24.0
+
+# مدیریت زمان
+pytz>=2023.3
+python-dateutil>=2.8.2
+
+# متغیرهای محیطی
+python-dotenv>=1.0.0
+
+# لاگ و مانیتورینگ
+colorlog>=6.7.0
+
+# اعلان‌ها (اختیاری)
+python-telegram-bot>=20.0
+
+# تحلیل تکنیکال (اختیاری)
+ta-lib>=0.4.0  # نیاز به نصب ta-lib سیستمی دارد
+pandas-ta>=0.3.14b
+
+# دیتابیس (اختیاری)
+sqlalchemy>=2.0.0
+
+# تست
+pytest>=7.4.0
+pytest-cov>=4.1.0
