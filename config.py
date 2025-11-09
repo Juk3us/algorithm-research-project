@@ -98,10 +98,13 @@ STRATEGY_TYPE = 'session_swing_retouch'  # استراتژی بر اساس تاچ
 MIN_CANDLES = 100  # افزایش برای شناسایی بهتر سوئینگ‌ها
 
 # حداقل تغییر قیمت برای ورود به معامله (به درصد)
-MIN_PRICE_CHANGE = 0.3  # 0.3%
+MIN_PRICE_CHANGE = 0.5  # 0.5% - افزایش برای فیلتر قوی‌تر
 
 # تعداد کندل برای تحلیل روند
-TREND_ANALYSIS_PERIOD = 10  # آخرین 10 کندل
+TREND_ANALYSIS_PERIOD = 15  # آخرین 15 کندل - افزایش برای دقت بیشتر
+
+# حداکثر فاصله تارگت (به درصد از قیمت فعلی)
+MAX_TARGET_DISTANCE = 0.08  # 8% - جلوگیری از تارگت‌های خیلی دور
 
 # ================== تنظیمات شناسایی سوئینگ (Swing Detection) ==================
 # تعداد کندل‌های گذشته برای شناسایی سوئینگ
@@ -135,7 +138,7 @@ TRADE_ON_HIGHER_HIGHS = True  # فروش در تاچ Higher High
 # استفاده از ATR برای محاسبه استاپ لاس
 USE_ATR_STOP_LOSS = True
 ATR_PERIOD = 14
-ATR_MULTIPLIER = 1.5
+ATR_MULTIPLIER = 2.0  # افزایش از 1.5 به 2.0 برای استاپ لاس عریض‌تر
 
 # ================== تنظیمات لاگ (Logging Settings) ==================
 LOG_LEVEL = 'INFO'  # DEBUG, INFO, WARNING, ERROR, CRITICAL

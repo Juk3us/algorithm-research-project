@@ -31,7 +31,12 @@ class SessionBacktest:
         self.balance = initial_balance
         self.symbol = symbol or config.MARKET_SYMBOL
         self.session_manager = SessionManager()
-        self.swing_manager = SessionSwingManager(persistence_file='backtest_swings.json')
+
+        # فایل جداگانه برای هر نماد برای جلوگیری از قاطی شدن سوئینگ‌ها
+        safe_symbol = self.symbol.replace('/', '_').replace('\\', '_')
+        self.swing_manager = SessionSwingManager(
+            persistence_file=f'backtest_swings_{safe_symbol}.json'
+        )
 
         # معاملات
         self.trades = []
@@ -526,23 +531,30 @@ class SessionBacktest:
                             )
 
                         if target_swing:
-                            # محاسبه استاپ لاس
-                            stop_loss = self.calculate_stop_loss(
-                                current_price,
-                                signal,
-                                df.iloc[:idx+1]
-                            )
+                            # بررسی فاصله تارگت (نباید خیلی دور باشد)
+                            target_distance_pct = abs(target_swing['price'] - current_price) / current_price
 
-                            # باز کردن معامله
-                            self.open_trade(
-                                signal,
-                                current_price,
-                                target_swing['price'],
-                                stop_loss,
-                                current_session,
-                                trend,
-                                timestamp
-                            )
+                            if target_distance_pct <= config.MAX_TARGET_DISTANCE:
+                                # محاسبه استاپ لاس
+                                stop_loss = self.calculate_stop_loss(
+                                    current_price,
+                                    signal,
+                                    df.iloc[:idx+1]
+                                )
+
+                                # باز کردن معامله
+                                self.open_trade(
+                                    signal,
+                                    current_price,
+                                    target_swing['price'],
+                                    stop_loss,
+                                    current_session,
+                                    trend,
+                                    timestamp
+                                )
+                            # else:
+                            #     # تارگت خیلی دور است، معامله نکن
+                            #     pass
 
         # بستن سشن آخر
         if current_session and len(session_data) > 0:

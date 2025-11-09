@@ -53,8 +53,8 @@ backtest_results/
 
 # Backtest Generated Files
 backtest_results.json
-backtest_swings.json
-session_swings.json
+backtest_swings*.json
+session_swings*.json
 
 # OS
 .DS_Store

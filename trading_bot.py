@@ -150,8 +150,8 @@ class TradingBot:
         Returns:
             ('bullish'/'bearish', قدرت روند)
         """
-        # بررسی 10 کندل اخیر
-        recent = df.tail(10)
+        # بررسی کندل‌های اخیر بر اساس تنظیمات
+        recent = df.tail(config.TREND_ANALYSIS_PERIOD)
 
         # محاسبه تغییر قیمت
         price_change = recent['close'].iloc[-1] - recent['close'].iloc[0]
@@ -232,6 +232,12 @@ class TradingBot:
 
         if not target_swing:
             logger.debug(f"تارگت مناسبی در سوئینگ‌های سشن قبلی پیدا نشد")
+            return None, None
+
+        # بررسی فاصله تارگت (نباید خیلی دور باشد)
+        target_distance_pct = abs(target_swing['price'] - current_price) / current_price
+        if target_distance_pct > config.MAX_TARGET_DISTANCE:
+            logger.debug(f"تارگت خیلی دور است ({target_distance_pct*100:.2f}% > {config.MAX_TARGET_DISTANCE*100:.2f}%)")
             return None, None
 
         # ساخت اطلاعات معامله
