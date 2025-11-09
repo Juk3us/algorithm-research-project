@@ -1,46 +1,97 @@
 """
-شناسایی سوئینگ‌ها و تحلیل تاچ سوئینگ‌های قبلی
-Swing Detection and Previous Swing Touch Analysis
+شناسایی و مدیریت سوئینگ‌های هر سشن معاملاتی
+Session-Based Swing Detection and Management
 """
 
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Tuple, Optional
 from datetime import datetime
+from typing import Dict, List, Tuple, Optional
+import json
+import os
+
 import config
 
 
-class SwingDetector:
-    """شناسایی و تحلیل سوئینگ‌های قیمتی"""
+class SessionSwingManager:
+    """مدیریت سوئینگ‌های هر سشن معاملاتی"""
 
-    def __init__(self):
-        """مقداردهی اولیه"""
-        self.swing_highs = []  # لیست سوئینگ های سقف
-        self.swing_lows = []   # لیست سوئینگ های کف
-        self.last_analysis_time = None
+    def __init__(self, persistence_file: str = 'session_swings.json'):
+        """
+        مقداردهی اولیه
+
+        Args:
+            persistence_file: فایل ذخیره سوئینگ‌ها
+        """
+        self.persistence_file = persistence_file
+
+        # جدول سوئینگ‌های هر سشن
+        # format: {'session_name': {'highs': [...], 'lows': [...]}}
+        self.session_swings = {
+            'tokyo': {'highs': [], 'lows': []},
+            'london': {'highs': [], 'lows': []},
+            'newyork': {'highs': [], 'lows': []}
+        }
+
+        # بارگذاری از فایل
+        self.load_swings()
+
+    def save_swings(self):
+        """ذخیره سوئینگ‌ها در فایل"""
+        try:
+            # تبدیل datetime به string
+            data_to_save = {}
+            for session, swings in self.session_swings.items():
+                data_to_save[session] = {
+                    'highs': [
+                        {**s, 'timestamp': s['timestamp'].isoformat() if isinstance(s['timestamp'], datetime) else s['timestamp']}
+                        for s in swings['highs']
+                    ],
+                    'lows': [
+                        {**s, 'timestamp': s['timestamp'].isoformat() if isinstance(s['timestamp'], datetime) else s['timestamp']}
+                        for s in swings['lows']
+                    ]
+                }
+
+            with open(self.persistence_file, 'w', encoding='utf-8') as f:
+                json.dump(data_to_save, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"خطا در ذخیره سوئینگ‌ها: {e}")
+
+    def load_swings(self):
+        """بارگذاری سوئینگ‌ها از فایل"""
+        try:
+            if os.path.exists(self.persistence_file):
+                with open(self.persistence_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+
+                # تبدیل string به datetime
+                for session in data:
+                    if session in self.session_swings:
+                        self.session_swings[session] = {
+                            'highs': [
+                                {**s, 'timestamp': pd.to_datetime(s['timestamp'])}
+                                for s in data[session].get('highs', [])
+                            ],
+                            'lows': [
+                                {**s, 'timestamp': pd.to_datetime(s['timestamp'])}
+                                for s in data[session].get('lows', [])
+                            ]
+                        }
+        except Exception as e:
+            print(f"خطا در بارگذاری سوئینگ‌ها: {e}")
 
     def find_swing_highs(self, df: pd.DataFrame,
                         left_bars: int = config.SWING_CONFIRMATION_CANDLES,
                         right_bars: int = config.SWING_CONFIRMATION_CANDLES) -> List[Dict]:
-        """
-        شناسایی سوئینگ های سقف (Swing Highs)
-
-        Args:
-            df: DataFrame حاوی داده‌های قیمت
-            left_bars: تعداد کندل‌های سمت چپ برای تأیید
-            right_bars: تعداد کندل‌های سمت راست برای تأیید
-
-        Returns:
-            لیست سوئینگ های سقف
-        """
+        """شناسایی سوئینگ های سقف"""
         swing_highs = []
         highs = df['high'].values
 
-        # از اول تا قبل از right_bars آخر
         for i in range(left_bars, len(df) - right_bars):
             is_swing_high = True
 
-            # بررسی کندل‌های سمت چپ
+            # بررسی چپ
             for j in range(1, left_bars + 1):
                 if highs[i] <= highs[i - j]:
                     is_swing_high = False
@@ -49,29 +100,27 @@ class SwingDetector:
             if not is_swing_high:
                 continue
 
-            # بررسی کندل‌های سمت راست
+            # بررسی راست
             for j in range(1, right_bars + 1):
                 if highs[i] <= highs[i + j]:
                     is_swing_high = False
                     break
 
             if is_swing_high:
-                # محاسبه قدرت سوئینگ
+                # محاسبه قدرت
                 left_diff = min([(highs[i] - highs[i - j]) / highs[i] * 100
                                 for j in range(1, left_bars + 1)])
                 right_diff = min([(highs[i] - highs[i + j]) / highs[i] * 100
                                  for j in range(1, right_bars + 1)])
                 strength = min(left_diff, right_diff)
 
-                # فقط سوئینگ‌های قوی
                 if strength >= config.MIN_SWING_STRENGTH:
                     swing_highs.append({
                         'index': i,
                         'timestamp': df.index[i],
-                        'price': highs[i],
+                        'price': float(highs[i]),
                         'type': 'high',
-                        'strength': strength,
-                        'touched': False
+                        'strength': float(strength)
                     })
 
         return swing_highs
@@ -79,25 +128,14 @@ class SwingDetector:
     def find_swing_lows(self, df: pd.DataFrame,
                        left_bars: int = config.SWING_CONFIRMATION_CANDLES,
                        right_bars: int = config.SWING_CONFIRMATION_CANDLES) -> List[Dict]:
-        """
-        شناسایی سوئینگ های کف (Swing Lows)
-
-        Args:
-            df: DataFrame حاوی داده‌های قیمت
-            left_bars: تعداد کندل‌های سمت چپ برای تأیید
-            right_bars: تعداد کندل‌های سمت راست برای تأیید
-
-        Returns:
-            لیست سوئینگ های کف
-        """
+        """شناسایی سوئینگ های کف"""
         swing_lows = []
         lows = df['low'].values
 
-        # از اول تا قبل از right_bars آخر
         for i in range(left_bars, len(df) - right_bars):
             is_swing_low = True
 
-            # بررسی کندل‌های سمت چپ
+            # بررسی چپ
             for j in range(1, left_bars + 1):
                 if lows[i] >= lows[i - j]:
                     is_swing_low = False
@@ -106,339 +144,218 @@ class SwingDetector:
             if not is_swing_low:
                 continue
 
-            # بررسی کندل‌های سمت راست
+            # بررسی راست
             for j in range(1, right_bars + 1):
                 if lows[i] >= lows[i + j]:
                     is_swing_low = False
                     break
 
             if is_swing_low:
-                # محاسبه قدرت سوئینگ
+                # محاسبه قدرت
                 left_diff = min([(lows[i - j] - lows[i]) / lows[i] * 100
                                 for j in range(1, left_bars + 1)])
                 right_diff = min([(lows[i + j] - lows[i]) / lows[i] * 100
                                  for j in range(1, right_bars + 1)])
                 strength = min(left_diff, right_diff)
 
-                # فقط سوئینگ‌های قوی
                 if strength >= config.MIN_SWING_STRENGTH:
                     swing_lows.append({
                         'index': i,
                         'timestamp': df.index[i],
-                        'price': lows[i],
+                        'price': float(lows[i]),
                         'type': 'low',
-                        'strength': strength,
-                        'touched': False
+                        'strength': float(strength)
                     })
 
         return swing_lows
 
-    def identify_higher_highs_lower_lows(self, swing_highs: List[Dict],
-                                         swing_lows: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
+    def update_session_swings(self, session_name: str, df: pd.DataFrame):
         """
-        شناسایی Higher Highs و Lower Lows
+        بروزرسانی سوئینگ‌های یک سشن
 
         Args:
-            swing_highs: لیست سوئینگ های سقف
-            swing_lows: لیست سوئینگ های کف
+            session_name: نام سشن (tokyo, london, newyork)
+            df: DataFrame حاوی داده‌های سشن
+        """
+        if session_name not in self.session_swings:
+            return
+
+        # شناسایی سوئینگ‌های جدید
+        new_highs = self.find_swing_highs(df)
+        new_lows = self.find_swing_lows(df)
+
+        # افزودن به جدول (بدون تکرار)
+        for swing in new_highs:
+            # بررسی تکراری نبودن
+            exists = any(
+                abs(s['price'] - swing['price']) < 1 and
+                abs((s['timestamp'] - swing['timestamp']).total_seconds()) < 3600
+                for s in self.session_swings[session_name]['highs']
+            )
+            if not exists:
+                self.session_swings[session_name]['highs'].append(swing)
+
+        for swing in new_lows:
+            exists = any(
+                abs(s['price'] - swing['price']) < 1 and
+                abs((s['timestamp'] - swing['timestamp']).total_seconds()) < 3600
+                for s in self.session_swings[session_name]['lows']
+            )
+            if not exists:
+                self.session_swings[session_name]['lows'].append(swing)
+
+        # ذخیره تغییرات
+        self.save_swings()
+
+    def remove_touched_swing(self, session_name: str, swing_type: str, swing_price: float):
+        """
+        حذف سوئینگ تاچ شده
+
+        Args:
+            session_name: نام سشن
+            swing_type: نوع ('high' یا 'low')
+            swing_price: قیمت سوئینگ
+        """
+        if session_name not in self.session_swings:
+            return
+
+        swing_list = self.session_swings[session_name]['highs' if swing_type == 'high' else 'lows']
+
+        # حذف سوئینگ
+        self.session_swings[session_name]['highs' if swing_type == 'high' else 'lows'] = [
+            s for s in swing_list if abs(s['price'] - swing_price) > 1
+        ]
+
+        # ذخیره
+        self.save_swings()
+
+    def get_previous_session_swings(self, current_session: str) -> Dict:
+        """
+        دریافت سوئینگ‌های سشن قبلی
+
+        Args:
+            current_session: سشن فعلی
 
         Returns:
-            (higher_highs, lower_lows)
+            سوئینگ‌های سشن قبلی
         """
-        higher_highs = []
-        lower_lows = []
+        # ترتیب سشن‌ها: tokyo -> london -> newyork -> tokyo
+        session_order = ['tokyo', 'london', 'newyork']
 
-        # شناسایی Higher Highs
-        for i in range(1, len(swing_highs)):
-            if swing_highs[i]['price'] > swing_highs[i-1]['price']:
-                swing_highs[i]['pattern'] = 'higher_high'
-                higher_highs.append(swing_highs[i])
-            elif swing_highs[i]['price'] < swing_highs[i-1]['price']:
-                swing_highs[i]['pattern'] = 'lower_high'
+        if current_session not in session_order:
+            return {'highs': [], 'lows': []}
 
-        # شناسایی Lower Lows
-        for i in range(1, len(swing_lows)):
-            if swing_lows[i]['price'] < swing_lows[i-1]['price']:
-                swing_lows[i]['pattern'] = 'lower_low'
-                lower_lows.append(swing_lows[i])
-            elif swing_lows[i]['price'] > swing_lows[i-1]['price']:
-                swing_lows[i]['pattern'] = 'higher_low'
+        current_index = session_order.index(current_session)
+        previous_index = (current_index - 1) % 3
+        previous_session = session_order[previous_index]
 
-        return higher_highs, lower_lows
+        return self.session_swings[previous_session]
 
-    def check_swing_touch(self, current_price: float, swing_level: float,
-                         swing_type: str) -> bool:
+    def check_swing_touch(self, current_price: float, swing_price: float) -> bool:
         """
         بررسی تاچ شدن سوئینگ
 
         Args:
             current_price: قیمت فعلی
-            swing_level: سطح سوئینگ
-            swing_type: نوع سوئینگ ('high' یا 'low')
+            swing_price: قیمت سوئینگ
 
         Returns:
-            True اگر سوئینگ تاچ شده
+            True اگر تاچ شده
         """
-        tolerance = swing_level * (config.SWING_TOUCH_TOLERANCE / 100)
+        tolerance = swing_price * (config.SWING_TOUCH_TOLERANCE / 100)
+        return abs(current_price - swing_price) <= tolerance
 
-        if swing_type == 'high':
-            # برای سوئینگ سقف، قیمت باید به سطح نزدیک شده یا بالاتر رفته باشد
-            return abs(current_price - swing_level) <= tolerance or current_price > swing_level
-        else:  # 'low'
-            # برای سوئینگ کف، قیمت باید به سطح نزدیک شده یا پایین‌تر آمده باشد
-            return abs(current_price - swing_level) <= tolerance or current_price < swing_level
-
-    def analyze_market(self, df: pd.DataFrame) -> Dict:
+    def find_nearest_target(self, current_price: float, swings: List[Dict],
+                           direction: str) -> Optional[Dict]:
         """
-        تحلیل کامل بازار و شناسایی سوئینگ‌ها
-
-        Args:
-            df: DataFrame حاوی داده‌های قیمت
-
-        Returns:
-            دیکشنری حاوی تحلیل کامل
-        """
-        if len(df) < config.MIN_CANDLES:
-            return {
-                'valid': False,
-                'reason': 'تعداد کندل کافی نیست'
-            }
-
-        # محدود کردن به lookback period
-        lookback_df = df.tail(config.SWING_LOOKBACK)
-
-        # شناسایی سوئینگ‌ها
-        swing_highs = self.find_swing_highs(lookback_df)
-        swing_lows = self.find_swing_lows(lookback_df)
-
-        # شناسایی الگوها
-        higher_highs, lower_lows = self.identify_higher_highs_lower_lows(
-            swing_highs, swing_lows
-        )
-
-        # ذخیره برای استفاده بعدی
-        self.swing_highs = swing_highs
-        self.swing_lows = swing_lows
-        self.last_analysis_time = datetime.now()
-
-        return {
-            'valid': True,
-            'swing_highs': swing_highs,
-            'swing_lows': swing_lows,
-            'higher_highs': higher_highs,
-            'lower_lows': lower_lows,
-            'total_swing_highs': len(swing_highs),
-            'total_swing_lows': len(swing_lows),
-            'total_higher_highs': len(higher_highs),
-            'total_lower_lows': len(lower_lows)
-        }
-
-    def find_untouched_swings(self, df: pd.DataFrame,
-                             analysis: Dict) -> Tuple[List[Dict], List[Dict]]:
-        """
-        پیدا کردن سوئینگ‌هایی که هنوز تاچ نشدند
-
-        Args:
-            df: DataFrame حاوی داده‌های قیمت
-            analysis: نتیجه تحلیل از analyze_market
-
-        Returns:
-            (untouched_highs, untouched_lows)
-        """
-        if not analysis['valid']:
-            return [], []
-
-        current_price = df['close'].iloc[-1]
-        untouched_highs = []
-        untouched_lows = []
-
-        # بررسی سوئینگ های سقف
-        for swing in analysis['swing_highs']:
-            if not swing.get('touched', False):
-                # بررسی تاچ شدن
-                if self.check_swing_touch(current_price, swing['price'], 'high'):
-                    swing['touched'] = True
-                    swing['touch_time'] = datetime.now()
-                else:
-                    untouched_highs.append(swing)
-
-        # بررسی سوئینگ های کف
-        for swing in analysis['swing_lows']:
-            if not swing.get('touched', False):
-                # بررسی تاچ شدن
-                if self.check_swing_touch(current_price, swing['price'], 'low'):
-                    swing['touched'] = True
-                    swing['touch_time'] = datetime.now()
-                else:
-                    untouched_lows.append(swing)
-
-        return untouched_highs, untouched_lows
-
-    def get_nearest_untouched_swing(self, current_price: float,
-                                   untouched_highs: List[Dict],
-                                   untouched_lows: List[Dict]) -> Optional[Dict]:
-        """
-        پیدا کردن نزدیک‌ترین سوئینگ تاچ نشده
+        پیدا کردن نزدیک‌ترین تارگت از سوئینگ‌ها
 
         Args:
             current_price: قیمت فعلی
-            untouched_highs: سوئینگ های سقف تاچ نشده
-            untouched_lows: سوئینگ های کف تاچ نشده
+            swings: لیست سوئینگ‌ها
+            direction: جهت معامله ('buy' یا 'sell')
 
         Returns:
-            نزدیک‌ترین سوئینگ یا None
+            نزدیک‌ترین سوئینگ هدف
         """
-        all_swings = []
+        if not swings:
+            return None
 
-        for swing in untouched_highs:
-            distance = abs(current_price - swing['price'])
-            all_swings.append({
-                **swing,
-                'distance': distance,
-                'distance_pct': (distance / current_price) * 100
-            })
+        valid_swings = []
 
-        for swing in untouched_lows:
-            distance = abs(current_price - swing['price'])
-            all_swings.append({
-                **swing,
-                'distance': distance,
-                'distance_pct': (distance / current_price) * 100
-            })
+        for swing in swings:
+            if direction == 'buy':
+                # برای خرید، به دنبال highs بالاتر از قیمت فعلی
+                if swing['price'] > current_price:
+                    distance = swing['price'] - current_price
+                    valid_swings.append({**swing, 'distance': distance})
+            else:  # sell
+                # برای فروش، به دنبال lows پایین‌تر از قیمت فعلی
+                if swing['price'] < current_price:
+                    distance = current_price - swing['price']
+                    valid_swings.append({**swing, 'distance': distance})
 
-        if not all_swings:
+        if not valid_swings:
             return None
 
         # مرتب‌سازی بر اساس فاصله
-        all_swings.sort(key=lambda x: x['distance'])
+        valid_swings.sort(key=lambda x: x['distance'])
 
-        return all_swings[0]
+        return valid_swings[0]
 
-    def generate_trading_signal(self, df: pd.DataFrame) -> Tuple[Optional[str], Optional[Dict]]:
-        """
-        تولید سیگنال معاملاتی بر اساس تاچ سوئینگ‌ها
+    def print_session_swings(self):
+        """چاپ جدول سوئینگ‌های تمام سشن‌ها"""
+        print("\n" + "=" * 80)
+        print("جدول سوئینگ‌های سشن‌ها".center(80))
+        print("=" * 80)
 
-        اصل اول: تمام سوئینگ‌ها یک بار دیگر تاچ می‌شوند
+        for session in ['tokyo', 'london', 'newyork']:
+            swings = self.session_swings[session]
+            print(f"\n📊 {session.upper()}:")
+            print(f"   Swing Highs: {len(swings['highs'])} عدد")
+            if swings['highs']:
+                for i, swing in enumerate(swings['highs'][-3:], 1):  # آخرین 3 تا
+                    print(f"      {i}. ${swing['price']:,.2f} (قدرت: {swing['strength']:.2f}%)")
 
-        Args:
-            df: DataFrame حاوی داده‌های قیمت
+            print(f"   Swing Lows: {len(swings['lows'])} عدد")
+            if swings['lows']:
+                for i, swing in enumerate(swings['lows'][-3:], 1):
+                    print(f"      {i}. ${swing['price']:,.2f} (قدرت: {swing['strength']:.2f}%)")
 
-        Returns:
-            (signal: 'buy'/'sell'/None, swing_info)
-        """
-        # تحلیل بازار
-        analysis = self.analyze_market(df)
-        if not analysis['valid']:
-            return None, None
-
-        # پیدا کردن سوئینگ‌های تاچ نشده
-        untouched_highs, untouched_lows = self.find_untouched_swings(df, analysis)
-
-        # قیمت فعلی
-        current_price = df['close'].iloc[-1]
-        current_high = df['high'].iloc[-1]
-        current_low = df['low'].iloc[-1]
-
-        # بررسی تاچ Higher Highs → سیگنال فروش
-        if config.TRADE_ON_HIGHER_HIGHS:
-            for swing in analysis['higher_highs']:
-                if self.check_swing_touch(current_high, swing['price'], 'high'):
-                    return 'sell', {
-                        'reason': 'تاچ Higher High',
-                        'swing_level': swing['price'],
-                        'swing_type': 'higher_high',
-                        'current_price': current_price,
-                        'strength': swing.get('strength', 0)
-                    }
-
-        # بررسی تاچ Lower Lows → سیگنال خرید
-        if config.TRADE_ON_LOWER_LOWS:
-            for swing in analysis['lower_lows']:
-                if self.check_swing_touch(current_low, swing['price'], 'low'):
-                    return 'buy', {
-                        'reason': 'تاچ Lower Low',
-                        'swing_level': swing['price'],
-                        'swing_type': 'lower_low',
-                        'current_price': current_price,
-                        'strength': swing.get('strength', 0)
-                    }
-
-        return None, None
-
-    def print_analysis(self, analysis: Dict):
-        """چاپ نتایج تحلیل"""
-        if not analysis['valid']:
-            print(f"❌ تحلیل نامعتبر: {analysis.get('reason', 'نامشخص')}")
-            return
-
-        print("\n" + "=" * 70)
-        print("تحلیل سوئینگ‌های بازار".center(70))
-        print("=" * 70)
-
-        print(f"\n📊 آمار کلی:")
-        print(f"   تعداد Swing Highs: {analysis['total_swing_highs']}")
-        print(f"   تعداد Swing Lows: {analysis['total_swing_lows']}")
-        print(f"   تعداد Higher Highs: {analysis['total_higher_highs']}")
-        print(f"   تعداد Lower Lows: {analysis['total_lower_lows']}")
-
-        if analysis['higher_highs']:
-            print(f"\n🔺 آخرین Higher High:")
-            hh = analysis['higher_highs'][-1]
-            print(f"   قیمت: ${hh['price']:,.2f}")
-            print(f"   قدرت: {hh.get('strength', 0):.2f}%")
-
-        if analysis['lower_lows']:
-            print(f"\n🔻 آخرین Lower Low:")
-            ll = analysis['lower_lows'][-1]
-            print(f"   قیمت: ${ll['price']:,.2f}")
-            print(f"   قدرت: {ll.get('strength', 0):.2f}%")
-
-        print("=" * 70 + "\n")
+        print("=" * 80 + "\n")
 
 
-# تست مستقل ماژول
+# تست
 if __name__ == "__main__":
-    print("تست شناسایی سوئینگ‌ها")
+    print("تست مدیریت سوئینگ‌های سشن")
     print("-" * 70)
 
-    # ایجاد داده تستی
-    dates = pd.date_range(start='2024-01-01', periods=100, freq='30min')
-    np.random.seed(42)
+    manager = SessionSwingManager()
 
-    # شبیه‌سازی قیمت با سوئینگ‌های واضح
-    price = 50000
-    prices = []
-    for i in range(100):
-        price += np.random.randn() * 100
-        if i % 10 == 0:
-            price += 500  # ایجاد سوئینگ صعودی
-        elif i % 15 == 0:
-            price -= 300  # ایجاد سوئینگ نزولی
-        prices.append(price)
+    # شبیه‌سازی داده
+    dates = pd.date_range(start='2024-11-09 01:00', periods=50, freq='30min')
+    prices = [50000 + i * 10 + np.random.randn() * 100 for i in range(50)]
 
     df = pd.DataFrame({
-        'timestamp': dates,
-        'open': prices,
         'high': [p + abs(np.random.randn() * 50) for p in prices],
         'low': [p - abs(np.random.randn() * 50) for p in prices],
-        'close': prices,
-        'volume': [1000 + np.random.randint(0, 500) for _ in range(100)]
-    })
-    df.set_index('timestamp', inplace=True)
+        'close': prices
+    }, index=dates)
 
-    # ایجاد detector
-    detector = SwingDetector()
+    # بروزرسانی سوئینگ‌های توکیو
+    manager.update_session_swings('tokyo', df)
 
-    # تحلیل
-    analysis = detector.analyze_market(df)
-    detector.print_analysis(analysis)
+    # نمایش جدول
+    manager.print_session_swings()
 
-    # تولید سیگنال
-    signal, info = detector.generate_trading_signal(df)
-    if signal:
-        print(f"\n✅ سیگنال: {signal.upper()}")
-        print(f"   دلیل: {info['reason']}")
-        print(f"   سطح سوئینگ: ${info['swing_level']:,.2f}")
-        print(f"   قیمت فعلی: ${info['current_price']:,.2f}")
-    else:
-        print("\n⚠️  سیگنال معاملاتی پیدا نشد")
+    # تست پیدا کردن تارگت
+    previous_swings = manager.get_previous_session_swings('london')
+    print(f"سوئینگ‌های سشن قبلی لندن (توکیو):")
+    print(f"  Highs: {len(previous_swings['highs'])}")
+    print(f"  Lows: {len(previous_swings['lows'])}")
+
+    # پیدا کردن نزدیک‌ترین تارگت
+    if previous_swings['highs']:
+        target = manager.find_nearest_target(50500, previous_swings['highs'], 'buy')
+        if target:
+            print(f"\nنزدیک‌ترین تارگت برای خرید: ${target['price']:,.2f}")

@@ -13,7 +13,7 @@ import logging
 import config
 from session_manager import SessionManager
 from risk_manager import RiskManager
-from swing_detector import SwingDetector
+from swing_detector import SessionSwingManager
 
 
 # تنظیمات لاگ
@@ -40,7 +40,7 @@ class TradingBot:
         # مدیریت سشن‌ها، ریسک و تحلیل سوئینگ
         self.session_manager = SessionManager()
         self.risk_manager = RiskManager()
-        self.swing_detector = SwingDetector()
+        self.swing_manager = SessionSwingManager()
 
         # راه‌اندازی صرافی
         self.exchange = self._init_exchange()
@@ -133,41 +133,132 @@ class TradingBot:
             logger.error(f"خطای ناشناخته در دریافت داده: {str(e)}")
             return None
 
+    def get_current_session(self) -> Optional[str]:
+        """تشخیص سشن فعلی"""
+        for session_key in ['tokyo', 'london', 'newyork']:
+            if self.session_manager.is_session_active(session_key):
+                return session_key
+        return None
+
+    def detect_trend(self, df: pd.DataFrame) -> Tuple[str, float]:
+        """
+        تشخیص روند در overlap
+
+        Args:
+            df: DataFrame حاوی داده‌های قیمت
+
+        Returns:
+            ('bullish'/'bearish', قدرت روند)
+        """
+        # بررسی 10 کندل اخیر
+        recent = df.tail(10)
+
+        # محاسبه تغییر قیمت
+        price_change = recent['close'].iloc[-1] - recent['close'].iloc[0]
+        price_change_pct = (price_change / recent['close'].iloc[0]) * 100
+
+        # محاسبه momentum
+        momentum = recent['close'].diff().mean()
+
+        # تشخیص روند
+        if price_change > 0 and momentum > 0:
+            return 'bullish', abs(price_change_pct)
+        elif price_change < 0 and momentum < 0:
+            return 'bearish', abs(price_change_pct)
+        else:
+            return 'neutral', 0
+
     def analyze_market(self, df: pd.DataFrame, overlap_info: Dict) -> Tuple[Optional[str], Optional[Dict]]:
         """
-        تحلیل بازار و تشخیص سیگنال بر اساس تاچ سوئینگ‌های قبلی
+        تحلیل بازار و تولید سیگنال
 
-        استراتژی: تمام سوئینگ‌ها یک بار دیگر تاچ می‌شوند
-        - تاچ Higher High → فروش
-        - تاچ Lower Low → خرید
+        استراتژی سه مرحله‌ای:
+        1. تشخیص سشن فعلی و بروزرسانی سوئینگ‌ها
+        2. تشخیص روند در overlap
+           - روند صعودی → فروش (انتظار اصلاح)
+           - روند نزولی → خرید (انتظار برگشت)
+        3. تارگت = سوئینگ‌های سشن قبلی
 
         Args:
             df: DataFrame حاوی داده‌های قیمت
             overlap_info: اطلاعات همپوشانی فعال
 
         Returns:
-            (سیگنال: 'buy', 'sell' یا None, اطلاعات سوئینگ)
+            (سیگنال: 'buy', 'sell' یا None, اطلاعات معامله)
         """
         if df is None or len(df) < config.MIN_CANDLES:
             logger.debug("تعداد کندل کافی نیست")
             return None, None
 
-        # تولید سیگنال با استفاده از swing detector
-        signal, swing_info = self.swing_detector.generate_trading_signal(df)
+        # ✅ مرحله 1: تشخیص سشن و بروزرسانی سوئینگ‌ها
+        current_session = self.get_current_session()
+        if not current_session:
+            logger.debug("هیچ سشنی فعال نیست")
+            return None, None
 
-        if signal and swing_info:
-            logger.info("=" * 70)
-            if signal == 'buy':
-                logger.info(f"🟢 سیگنال خرید")
-            else:
-                logger.info(f"🔴 سیگنال فروش")
-            logger.info(f"   دلیل: {swing_info['reason']}")
-            logger.info(f"   سطح سوئینگ: ${swing_info['swing_level']:,.2f}")
-            logger.info(f"   قیمت فعلی: ${swing_info['current_price']:,.2f}")
-            logger.info(f"   قدرت سوئینگ: {swing_info['strength']:.2f}%")
-            logger.info("=" * 70)
+        # بروزرسانی سوئینگ‌های سشن فعلی
+        self.swing_manager.update_session_swings(current_session, df)
 
-        return signal, swing_info
+        # ✅ مرحله 2: تشخیص روند
+        trend, trend_strength = self.detect_trend(df)
+
+        if trend == 'neutral' or trend_strength < config.MIN_PRICE_CHANGE:
+            logger.debug(f"روند ضعیف یا خنثی: {trend} ({trend_strength:.2f}%)")
+            return None, None
+
+        # ✅ مرحله 3: تعیین جهت معامله و تارگت
+        signal = None
+        target_swing = None
+        current_price = df['close'].iloc[-1]
+
+        # دریافت سوئینگ‌های سشن قبلی
+        previous_swings = self.swing_manager.get_previous_session_swings(current_session)
+
+        if trend == 'bullish':
+            # روند صعودی → فروش (انتظار اصلاح)
+            # تارگت = سوئینگ lows سشن قبلی
+            signal = 'sell'
+            target_swing = self.swing_manager.find_nearest_target(
+                current_price, previous_swings['lows'], 'sell'
+            )
+
+        elif trend == 'bearish':
+            # روند نزولی → خرید (انتظار برگشت)
+            # تارگت = سوئینگ highs سشن قبلی
+            signal = 'buy'
+            target_swing = self.swing_manager.find_nearest_target(
+                current_price, previous_swings['highs'], 'buy'
+            )
+
+        if not target_swing:
+            logger.debug(f"تارگت مناسبی در سوئینگ‌های سشن قبلی پیدا نشد")
+            return None, None
+
+        # ساخت اطلاعات معامله
+        trade_info = {
+            'session': current_session,
+            'trend': trend,
+            'trend_strength': trend_strength,
+            'current_price': current_price,
+            'target_price': target_swing['price'],
+            'target_distance': target_swing['distance'],
+            'target_swing': target_swing
+        }
+
+        # لاگ اطلاعات
+        logger.info("=" * 70)
+        if signal == 'buy':
+            logger.info(f"🟢 سیگنال خرید")
+        else:
+            logger.info(f"🔴 سیگنال فروش")
+        logger.info(f"   سشن فعلی: {current_session.upper()}")
+        logger.info(f"   روند: {trend.upper()} ({trend_strength:.2f}%)")
+        logger.info(f"   قیمت فعلی: ${current_price:,.2f}")
+        logger.info(f"   تارگت: ${target_swing['price']:,.2f} (فاصله: ${target_swing['distance']:,.2f})")
+        logger.info(f"   قدرت سوئینگ تارگت: {target_swing['strength']:.2f}%")
+        logger.info("=" * 70)
+
+        return signal, trade_info
 
     def execute_trade(self, signal: str, df: pd.DataFrame) -> bool:
         """
