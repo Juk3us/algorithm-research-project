@@ -54,12 +54,6 @@ class SessionBacktest:
         self.overlap_trend = None
         self.overlap_trend_strength = 0
 
-        # متغیرهای استراتژی Flip/Reversal
-        self.current_phase = None  # 'phase1' or 'phase2'
-        self.phase1_signal = None  # سیگنال فاز اول
-        self.last_swing_price = None  # قیمت آخرین سوئینگ
-        self.current_session_for_flip = None  # سشن فعلی برای flip
-
         # راه‌اندازی صرافی
         # سعی برای استفاده از صرافی‌های مختلف
         self.exchange = None
@@ -309,7 +303,7 @@ class SessionBacktest:
 
     def open_trade(self, signal: str, entry_price: float, target_price: float,
                    stop_loss: float, session: str, trend: str, timestamp: pd.Timestamp,
-                   total_positions: int = 1, is_last_swing: bool = False):
+                   total_positions: int = 1):
         """
         باز کردن معامله
 
@@ -322,7 +316,6 @@ class SessionBacktest:
             trend: روند
             timestamp: زمان ورود
             total_positions: تعداد کل پوزیشن‌های همزمان (برای تقسیم حجم)
-            is_last_swing: آیا این آخرین (افراطی‌ترین) سوئینگ است؟
         """
         # محاسبه ریسک
         if signal == 'buy':
@@ -351,8 +344,7 @@ class SessionBacktest:
             'trend': trend,
             'risk': risk,
             'reward': reward,
-            'risk_reward_ratio': reward / risk if risk > 0 else 0,
-            'is_last_swing': is_last_swing  # آیا این آخرین سوئینگ است؟
+            'risk_reward_ratio': reward / risk if risk > 0 else 0
         }
 
         # افزودن به لیست پوزیشن‌های باز
@@ -458,104 +450,9 @@ class SessionBacktest:
                 position['target_price']
             )
 
-            # بررسی Flip/Reversal: آیا این آخرین سوئینگ است؟
-            if position.get('is_last_swing') and self.current_phase == 'phase1':
-                print(f"\n🔄 FLIP TRIGGERED! آخرین سوئینگ فاز 1 رسید - شروع فاز 2")
-                print(f"   قیمت flip: ${exit_price:,.5f}")
-
-                # سیگنال مخالف
-                opposite_signal = 'buy' if position['signal'] == 'sell' else 'sell'
-                print(f"   سیگنال جدید: {opposite_signal.upper()}")
-
-                # دریافت سوئینگ‌های مخالف از همان session قبلی
-                previous_swings = self.swing_manager.get_previous_session_swings(position['session'])
-
-                # انتخاب سوئینگ‌های مخالف
-                if opposite_signal == 'buy':
-                    target_swings = previous_swings['highs']
-                else:
-                    target_swings = previous_swings['lows']
-
-                # فیلتر کردن سوئینگ‌ها بر اساس فاصله
-                valid_swings = []
-                for swing in target_swings:
-                    distance_pct = abs(swing['price'] - exit_price) / exit_price
-                    if distance_pct <= config.MAX_TARGET_DISTANCE:
-                        valid_swings.append(swing)
-
-                if valid_swings:
-                    num_positions = len(valid_swings)
-                    print(f"   📊 {num_positions} سوئینگ مخالف پیدا شد - باز کردن {num_positions} پوزیشن فاز 2")
-
-                    # مرتب‌سازی سوئینگ‌ها برای شناسایی آخرین فاز 2
-                    sorted_swings = sorted(
-                        valid_swings,
-                        key=lambda x: x['price'],
-                        reverse=(opposite_signal == 'buy')
-                    )
-                    last_swing_price = sorted_swings[-1]['price']
-
-                    # محاسبه استاپ لاس جدید - باید از داده‌های فعلی استفاده کنیم
-                    # فعلاً از قیمت entry قبلی به عنوان مرجع استفاده می‌کنیم
-                    # (این باید در آینده بهینه شود)
-                    if opposite_signal == 'buy':
-                        stop_loss = exit_price - abs(position['stop_loss'] - position['entry_price'])
-                    else:
-                        stop_loss = exit_price + abs(position['stop_loss'] - position['entry_price'])
-
-                    # باز کردن پوزیشن‌های فاز 2
-                    print(f"\n{'🟢 خرید' if opposite_signal == 'buy' else '🔴 فروش'} (فاز 2) | "
-                          f"قیمت: ${exit_price:,.5f} | SL: ${stop_loss:,.5f}")
-
-                    for i, swing in enumerate(valid_swings, 1):
-                        is_last = (swing['price'] == last_swing_price)
-                        marker = "⭐" if is_last else "  "
-                        print(f"   {i}. {marker} TP: ${swing['price']:,.5f}")
-                        self.open_trade(
-                            opposite_signal,
-                            exit_price,
-                            swing['price'],
-                            stop_loss,
-                            position['session'],
-                            position['trend'],
-                            exit_time,
-                            num_positions,
-                            is_last
-                        )
-
-                    # تغییر فاز
-                    self.current_phase = 'phase2'
-                    self.last_swing_price = exit_price
-                else:
-                    print(f"   ⚠️  هیچ سوئینگ مخالف مناسبی برای فاز 2 پیدا نشد")
-                    # ریست کردن فاز
-                    self.current_phase = None
-                    self.phase1_signal = None
-
         # حذف از لیست پوزیشن‌ها
         if position in self.open_positions:
             self.open_positions.remove(position)
-
-        # بررسی ریست فاز: اگر همه پوزیشن‌ها بسته شدند
-        if len(self.open_positions) == 0 and self.current_phase is not None:
-            print(f"   ℹ️  همه پوزیشن‌های {self.current_phase} بسته شدند - ریست فاز")
-            self.current_phase = None
-            self.phase1_signal = None
-            self.last_swing_price = None
-            self.current_session_for_flip = None
-
-        # بررسی stop loss در فاز 1: اگر SL hit شد قبل از رسیدن به آخرین سوئینگ
-        if not won and self.current_phase == 'phase1':
-            print(f"   ⚠️  Stop Loss در فاز 1 - لغو flip و ریست فاز")
-            # بستن همه پوزیشن‌های باقیمانده فاز 1
-            for pos in self.open_positions[:]:
-                if pos in self.open_positions:
-                    self.open_positions.remove(pos)
-            # ریست فاز
-            self.current_phase = None
-            self.phase1_signal = None
-            self.last_swing_price = None
-            self.current_session_for_flip = None
 
     def run_backtest(self, df: pd.DataFrame):
         """
@@ -672,16 +569,6 @@ class SessionBacktest:
                                 num_positions = len(valid_swings)
                                 print(f"   📊 {num_positions} سوئینگ مناسب پیدا شد - باز کردن {num_positions} پوزیشن")
 
-                                # مرتب‌سازی سوئینگ‌ها برای شناسایی آخرین (افراطی‌ترین)
-                                # برای SELL: پایین‌ترین lower low آخرین است
-                                # برای BUY: بالاترین higher high آخرین است
-                                sorted_swings = sorted(
-                                    valid_swings,
-                                    key=lambda x: x['price'],
-                                    reverse=(signal == 'buy')  # بالاترین برای buy، پایین‌ترین برای sell
-                                )
-                                last_swing_price = sorted_swings[-1]['price']  # افراطی‌ترین
-
                                 # محاسبه استاپ لاس مشترک
                                 stop_loss = self.calculate_stop_loss(
                                     current_price,
@@ -689,19 +576,11 @@ class SessionBacktest:
                                     df.iloc[:idx+1]
                                 )
 
-                                # ذخیره اطلاعات فاز 1
-                                if self.current_phase is None:
-                                    self.current_phase = 'phase1'
-                                    self.phase1_signal = signal
-                                    self.current_session_for_flip = current_session
-
                                 # باز کردن یک پوزیشن جداگانه برای هر سوئینگ
                                 print(f"\n{'🟢 خرید' if signal == 'buy' else '🔴 فروش'} | "
                                       f"قیمت: ${current_price:,.5f} | SL: ${stop_loss:,.5f}")
                                 for i, swing in enumerate(valid_swings, 1):
-                                    is_last = (swing['price'] == last_swing_price)
-                                    marker = "⭐" if is_last else "  "
-                                    print(f"   {i}. {marker} TP: ${swing['price']:,.5f}")
+                                    print(f"   {i}. TP: ${swing['price']:,.5f}")
                                     self.open_trade(
                                         signal,
                                         current_price,
@@ -710,8 +589,7 @@ class SessionBacktest:
                                         current_session,
                                         trend,
                                         timestamp,
-                                        num_positions,  # تعداد کل پوزیشن‌ها
-                                        is_last  # آیا این آخرین سوئینگ است؟
+                                        num_positions  # تعداد کل پوزیشن‌ها
                                     )
                             else:
                                 print(f"   ⚠️  همه تارگت‌ها خیلی دور هستند (>{config.MAX_TARGET_DISTANCE*100:.0f}%) - معامله نکن")
