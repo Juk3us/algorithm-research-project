@@ -43,26 +43,38 @@ def analyze_market():
     print("تحلیل وضعیت فعلی بازار AUD/USD".center(80))
     print("="*80)
 
-    # اتصال به صرافی
-    exchange = None
-    for exchange_class in [ccxt.binance, ccxt.bybit, ccxt.okx]:
-        try:
-            exchange = exchange_class({
-                'enableRateLimit': True,
-                'options': {'defaultType': 'spot'}
-            })
-            exchange.load_markets()
-            print(f"✅ اتصال به {exchange.name} برقرار شد")
-            break
-        except Exception as e:
-            print(f"⚠️  خطا در اتصال به {exchange_class.__name__}: {e}")
-            continue
+    # تلاش برای اتصال به KuCoin
+    api_key = '642080b050d2730001387aa7'
+    api_secret = 'Hanibal@293'
 
-    if not exchange:
-        print("❌ نمی‌توانم به هیچ صرافی متصل شوم")
-        print("\n⚠️  توجه: برای AUD/USD نیاز به broker فارکس داریم، نه صرافی کریپتو")
-        print("   پیشنهاد: از داده‌های یک بروکر فارکس مانند OANDA یا یک سرویس داده استفاده کنید")
-        return
+    exchange = None
+
+    # تلاش با credentials
+    try:
+        print("\n🔌 تلاش برای اتصال به KuCoin با API credentials...")
+        exchange = ccxt.kucoin({
+            'apiKey': api_key,
+            'secret': api_secret,
+            'enableRateLimit': True,
+            'timeout': 30000
+        })
+        exchange.load_markets()
+        print(f"✅ اتصال به {exchange.name} برقرار شد")
+    except Exception as e:
+        print(f"⚠️  خطا: {e}")
+
+        # تلاش بدون credentials (داده‌های عمومی)
+        try:
+            print("\n🔌 تلاش بدون credentials (داده‌های عمومی)...")
+            exchange = ccxt.kucoin({'enableRateLimit': True, 'timeout': 30000})
+            exchange.load_markets()
+            print(f"✅ اتصال برقرار شد")
+        except Exception as e2:
+            print(f"❌ باز هم خطا: {e2}")
+            print("\n⚠️  مشکل: دسترسی به اینترنت یا API محدود است")
+            print("   توجه: KuCoin یک صرافی کریپتو است و AUD/USD را ندارد.")
+            print("   برای AUD/USD نیاز به broker فارکس (مثل OANDA) است.")
+            return
 
     # دریافت داده‌های 3 روز گذشته (برای شناسایی سوئینگ‌ها)
     try:
