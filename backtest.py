@@ -54,24 +54,22 @@ class SessionBacktest:
         self.overlap_trend = None
         self.overlap_trend_strength = 0
 
-        # راه‌اندازی صرافی
-        # سعی برای استفاده از صرافی‌های مختلف
+        # راه‌اندازی صرافی - اتصال به KuCoin
         self.exchange = None
-        for exchange_class in [ccxt.binance, ccxt.bybit, ccxt.okx]:
-            try:
-                self.exchange = exchange_class({
-                    'enableRateLimit': True,
-                    'options': {'defaultType': 'spot'}
-                })
-                # تست اتصال
-                self.exchange.load_markets()
-                print(f"✅ اتصال به {self.exchange.name} برقرار شد")
-                break
-            except:
-                continue
-
-        if not self.exchange:
-            print("⚠️  نمی‌توانم به هیچ صرافی متصل شوم - استفاده از داده‌های شبیه‌سازی شده")
+        try:
+            print("🔌 اتصال به KuCoin...")
+            self.exchange = ccxt.kucoin({
+                'apiKey': '642080b050d2730001387aa7',
+                'secret': 'Hanibal@293',
+                'enableRateLimit': True,
+                'timeout': 30000
+            })
+            # تست اتصال
+            self.exchange.load_markets()
+            print(f"✅ اتصال به {self.exchange.name} برقرار شد")
+        except Exception as e:
+            print(f"⚠️  خطا در اتصال به KuCoin: {e}")
+            print("⚠️  استفاده از داده‌های شبیه‌سازی شده")
             self.exchange = None
 
     def fetch_historical_data(self, days: int = 10) -> pd.DataFrame:
