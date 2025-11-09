@@ -152,12 +152,14 @@ class SessionManager:
         )
 
     def get_active_overlaps(self,
-                           current_time: Optional[datetime] = None) -> List[Dict]:
+                           current_time: Optional[datetime] = None,
+                           only_tradable: bool = True) -> List[Dict]:
         """
         دریافت لیست همپوشانی‌های فعال (مرتب شده بر اساس اولویت)
 
         Args:
             current_time: زمان مورد بررسی (پیش‌فرض: زمان فعلی)
+            only_tradable: فقط همپوشانی‌هایی که معامله مجاز است
 
         Returns:
             لیست همپوشانی‌های فعال با اطلاعات کامل
@@ -168,12 +170,18 @@ class SessionManager:
         active_overlaps = []
         for overlap_key, overlap_data in self.overlaps.items():
             if self.is_overlap_active(overlap_key, current_time):
+                # فیلتر کردن بر اساس allow_trading
+                allow_trading = overlap_data.get('allow_trading', True)
+                if only_tradable and not allow_trading:
+                    continue
+
                 active_overlaps.append({
                     'key': overlap_key,
                     'name': overlap_data['name'],
                     'priority': overlap_data['priority'],
                     'start': overlap_data['start'],
-                    'end': overlap_data['end']
+                    'end': overlap_data['end'],
+                    'allow_trading': allow_trading
                 })
 
         # مرتب‌سازی بر اساس اولویت (بالاترین اولویت اول)
@@ -205,9 +213,10 @@ class SessionManager:
         Returns:
             (آیا باید معامله کرد, اطلاعات همپوشانی)
         """
+        # فقط همپوشانی‌های قابل معامله را در نظر بگیر
         highest_priority = self.get_highest_priority_overlap(current_time)
 
-        if highest_priority:
+        if highest_priority and highest_priority.get('allow_trading', True):
             return True, highest_priority
         else:
             return False, None

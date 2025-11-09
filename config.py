@@ -28,20 +28,20 @@ TIMEZONE = 'Asia/Tehran'  # منطقه زمانی تهران (GMT+3:30)
 TRADING_SESSIONS = {
     'tokyo': {
         'name': 'Tokyo (Asia)',
-        'open': '04:00',
-        'close': '12:30',
+        'open': '01:00',
+        'close': '09:30',
         'gmt_offset': 3
     },
     'london': {
         'name': 'London (Europe)',
-        'open': '10:00',
-        'close': '18:30',
+        'open': '07:00',
+        'close': '15:30',
         'gmt_offset': 3
     },
     'newyork': {
         'name': 'New York (America)',
-        'open': '21:00',
-        'close': '05:30',  # روز بعد
+        'open': '18:00',
+        'close': '02:30',  # روز بعد
         'gmt_offset': 3
     }
 }
@@ -49,23 +49,26 @@ TRADING_SESSIONS = {
 # ================== همپوشانی سشن‌ها (Session Overlaps) ==================
 # این زمان‌ها کلید اصلی تصمیم‌گیری هستند
 SESSION_OVERLAPS = {
-    'tokyo_london': {
-        'name': 'Tokyo-London Overlap',
-        'start': '10:00',
-        'end': '12:30',
-        'priority': 2  # اولویت متوسط
-    },
-    'london_newyork': {
-        'name': 'London-NewYork Overlap',
-        'start': '15:00',  # 3 PM GMT+3
-        'end': '18:30',
-        'priority': 3  # بالاترین اولویت - نقدینگی بالا
-    },
     'newyork_tokyo': {
         'name': 'NewYork-Tokyo Overlap',
-        'start': '04:00',
-        'end': '05:30',
-        'priority': 1  # کمترین اولویت
+        'start': '01:00',
+        'end': '02:30',
+        'priority': 2,  # اولویت متوسط
+        'allow_trading': True
+    },
+    'tokyo_london': {
+        'name': 'Tokyo-London Overlap',
+        'start': '07:00',
+        'end': '09:30',
+        'priority': 3,  # اولویت بالا
+        'allow_trading': True
+    },
+    'rest_time': {
+        'name': 'Rest Time (No Trading)',
+        'start': '15:30',
+        'end': '18:00',
+        'priority': 0,  # بدون اولویت
+        'allow_trading': False  # زمان استراحت - معامله ممنوع
     }
 }
 
@@ -88,11 +91,43 @@ RISK_REWARD_RATIO = 2.0  # برای هر 1 واحد ریسک، 2 واحد سود
 MIN_BALANCE = 10.0  # حداقل 10 USDT
 
 # ================== تنظیمات استراتژی (Strategy Settings) ==================
+# نوع استراتژی
+STRATEGY_TYPE = 'swing_touch'  # استراتژی بر اساس تاچ سوئینگ‌های قبلی
+
 # حداقل تعداد کندل برای تحلیل
-MIN_CANDLES = 50
+MIN_CANDLES = 100  # افزایش برای شناسایی بهتر سوئینگ‌ها
 
 # حداقل تغییر قیمت برای ورود به معامله (به درصد)
-MIN_PRICE_CHANGE = 0.5  # 0.5%
+MIN_PRICE_CHANGE = 0.3  # 0.3%
+
+# ================== تنظیمات شناسایی سوئینگ (Swing Detection) ==================
+# تعداد کندل‌های گذشته برای شناسایی سوئینگ
+SWING_LOOKBACK = 50  # 50 کندل گذشته
+
+# حداقل تعداد کندل بین دو سوئینگ
+MIN_SWING_DISTANCE = 5  # حداقل 5 کندل فاصله
+
+# درصد تلرانس برای تاچ سوئینگ (به درصد)
+SWING_TOUCH_TOLERANCE = 0.3  # 0.3% تلرانس
+
+# حداکثر فاصله زمانی سوئینگ (تعداد کندل)
+MAX_SWING_AGE = 100  # سوئینگ‌های بیشتر از 100 کندل قدیمی نادیده گرفته می‌شوند
+
+# حداقل قدرت سوئینگ (تفاوت با کندل‌های همسایه به درصد)
+MIN_SWING_STRENGTH = 0.2  # 0.2%
+
+# تعداد کندل‌های چپ و راست برای تأیید سوئینگ
+SWING_CONFIRMATION_CANDLES = 2  # 2 کندل چپ و راست
+
+# ================== قوانین معاملاتی بر اساس سوئینگ ==================
+# اصل اول: تمام سوئینگ‌ها یک بار دیگر تاچ می‌شوند
+SWING_RETOUCH_PRINCIPLE = True
+
+# معامله در سوئینگ های Lower Low
+TRADE_ON_LOWER_LOWS = True  # خرید در تاچ Lower Low
+
+# معامله در سوئینگ های Higher High
+TRADE_ON_HIGHER_HIGHS = True  # فروش در تاچ Higher High
 
 # استفاده از ATR برای محاسبه استاپ لاس
 USE_ATR_STOP_LOSS = True

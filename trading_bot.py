@@ -13,6 +13,7 @@ import logging
 import config
 from session_manager import SessionManager
 from risk_manager import RiskManager
+from swing_detector import SwingDetector
 
 
 # تنظیمات لاگ
@@ -36,9 +37,10 @@ class TradingBot:
         logger.info("راه‌اندازی ربات معاملاتی")
         logger.info("=" * 70)
 
-        # مدیریت سشن‌ها و ریسک
+        # مدیریت سشن‌ها، ریسک و تحلیل سوئینگ
         self.session_manager = SessionManager()
         self.risk_manager = RiskManager()
+        self.swing_detector = SwingDetector()
 
         # راه‌اندازی صرافی
         self.exchange = self._init_exchange()
@@ -131,57 +133,41 @@ class TradingBot:
             logger.error(f"خطای ناشناخته در دریافت داده: {str(e)}")
             return None
 
-    def analyze_market(self, df: pd.DataFrame, overlap_info: Dict) -> Tuple[Optional[str], float]:
+    def analyze_market(self, df: pd.DataFrame, overlap_info: Dict) -> Tuple[Optional[str], Optional[Dict]]:
         """
-        تحلیل بازار و تشخیص سیگنال
+        تحلیل بازار و تشخیص سیگنال بر اساس تاچ سوئینگ‌های قبلی
+
+        استراتژی: تمام سوئینگ‌ها یک بار دیگر تاچ می‌شوند
+        - تاچ Higher High → فروش
+        - تاچ Lower Low → خرید
 
         Args:
             df: DataFrame حاوی داده‌های قیمت
             overlap_info: اطلاعات همپوشانی فعال
 
         Returns:
-            (سیگنال: 'buy', 'sell' یا None, قدرت سیگنال: 0-1)
+            (سیگنال: 'buy', 'sell' یا None, اطلاعات سوئینگ)
         """
         if df is None or len(df) < config.MIN_CANDLES:
-            return None, 0
+            logger.debug("تعداد کندل کافی نیست")
+            return None, None
 
-        # محاسبه روند در زون همپوشانی
-        recent_candles = df.tail(10)  # 10 کندل اخیر
-        price_change = recent_candles['close'].iloc[-1] - recent_candles['close'].iloc[0]
-        price_change_pct = (price_change / recent_candles['close'].iloc[0]) * 100
+        # تولید سیگنال با استفاده از swing detector
+        signal, swing_info = self.swing_detector.generate_trading_signal(df)
 
-        # بررسی حداقل تغییر قیمت
-        if abs(price_change_pct) < config.MIN_PRICE_CHANGE:
-            logger.debug(f"تغییر قیمت ناچیز: {price_change_pct:.2f}%")
-            return None, 0
+        if signal and swing_info:
+            logger.info("=" * 70)
+            if signal == 'buy':
+                logger.info(f"🟢 سیگنال خرید")
+            else:
+                logger.info(f"🔴 سیگنال فروش")
+            logger.info(f"   دلیل: {swing_info['reason']}")
+            logger.info(f"   سطح سوئینگ: ${swing_info['swing_level']:,.2f}")
+            logger.info(f"   قیمت فعلی: ${swing_info['current_price']:,.2f}")
+            logger.info(f"   قدرت سوئینگ: {swing_info['strength']:.2f}%")
+            logger.info("=" * 70)
 
-        # تحلیل سوئینگ‌ها
-        higher_highs = (df['high'] > df['high'].shift()).sum()
-        lower_lows = (df['low'] < df['low'].shift()).sum()
-
-        # محاسبه momentum
-        momentum = recent_candles['close'].diff().mean()
-
-        # تصمیم‌گیری
-        signal = None
-        signal_strength = 0
-
-        # لاجیک اصلی: در overlap بر اساس روند تصمیم می‌گیریم
-        if price_change > 0:  # روند صعودی
-            # استراتژی: در روند صعودی، sell می‌کنیم (فرض بر اصلاح)
-            if momentum > 0 and higher_highs > lower_lows:
-                signal = 'sell'
-                signal_strength = min(abs(price_change_pct) / 2, 1.0)
-                logger.info(f"🔴 سیگنال فروش - تغییر قیمت: +{price_change_pct:.2f}%")
-
-        elif price_change < 0:  # روند نزولی
-            # استراتژی: در روند نزولی، buy می‌کنیم (فرض بر برگشت)
-            if momentum < 0 and lower_lows > higher_highs:
-                signal = 'buy'
-                signal_strength = min(abs(price_change_pct) / 2, 1.0)
-                logger.info(f"🟢 سیگنال خرید - تغییر قیمت: {price_change_pct:.2f}%")
-
-        return signal, signal_strength
+        return signal, swing_info
 
     def execute_trade(self, signal: str, df: pd.DataFrame) -> bool:
         """
@@ -401,13 +387,13 @@ class TradingBot:
 
                 if df is not None:
                     # تحلیل بازار
-                    signal, strength = self.analyze_market(df, overlap_info)
+                    signal, swing_info = self.analyze_market(df, overlap_info)
 
                     # اجرای معامله
-                    if signal and strength > 0.5:  # حداقل قدرت سیگنال 50%
+                    if signal and swing_info:
                         self.execute_trade(signal, df)
                     else:
-                        logger.debug("سیگنال معاملاتی قوی پیدا نشد")
+                        logger.debug("سیگنال معاملاتی پیدا نشد (هیچ سوئینگی تاچ نشده)")
             else:
                 logger.debug("خارج از زمان همپوشانی سشن‌ها")
 
