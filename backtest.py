@@ -40,7 +40,7 @@ class SessionBacktest:
 
         # معاملات
         self.trades = []
-        self.open_position = None
+        self.open_positions = []  # تغییر به لیست برای چند پوزیشن همزمان
 
         # آمار
         self.total_trades = 0
@@ -302,7 +302,8 @@ class SessionBacktest:
         return stop_loss
 
     def open_trade(self, signal: str, entry_price: float, target_price: float,
-                   stop_loss: float, session: str, trend: str, timestamp: pd.Timestamp):
+                   stop_loss: float, session: str, trend: str, timestamp: pd.Timestamp,
+                   total_positions: int = 1):
         """
         باز کردن معامله
 
@@ -314,6 +315,7 @@ class SessionBacktest:
             session: سشن فعلی
             trend: روند
             timestamp: زمان ورود
+            total_positions: تعداد کل پوزیشن‌های همزمان (برای تقسیم حجم)
         """
         # محاسبه ریسک
         if signal == 'buy':
@@ -323,14 +325,15 @@ class SessionBacktest:
             risk = stop_loss - entry_price
             reward = entry_price - target_price
 
-        # محاسبه حجم معامله
+        # محاسبه حجم معامله (تقسیم بر تعداد پوزیشن‌ها)
         risk_amount = self.balance * config.MAX_TRADE_RISK
-        position_size = risk_amount / risk if risk > 0 else 0
+        base_position_size = risk_amount / risk if risk > 0 else 0
+        position_size = base_position_size / total_positions  # تقسیم حجم
 
         if position_size <= 0:
             return
 
-        self.open_position = {
+        new_position = {
             'signal': signal,
             'entry_price': entry_price,
             'target_price': target_price,
@@ -344,66 +347,60 @@ class SessionBacktest:
             'risk_reward_ratio': reward / risk if risk > 0 else 0
         }
 
-        print(f"\n{'🟢 خرید' if signal == 'buy' else '🔴 فروش'} | "
-              f"قیمت: ${entry_price:,.2f} | "
-              f"تارگت: ${target_price:,.2f} | "
-              f"SL: ${stop_loss:,.2f} | "
-              f"R/R: {self.open_position['risk_reward_ratio']:.2f}")
+        # افزودن به لیست پوزیشن‌های باز
+        self.open_positions.append(new_position)
 
     def check_position(self, current_candle: pd.Series):
         """
-        بررسی پوزیشن باز
+        بررسی پوزیشن‌های باز
 
         Args:
             current_candle: کندل فعلی
         """
-        if not self.open_position:
+        if not self.open_positions:
             return
 
-        pos = self.open_position
-        current_price = current_candle['close']
+        # بررسی هر پوزیشن
+        for pos in self.open_positions[:]:  # کپی لیست برای امکان تغییر در حین حلقه
+            current_price = current_candle['close']
 
-        # بررسی رسیدن به تارگت
-        target_hit = False
-        stop_hit = False
+            # بررسی رسیدن به تارگت
+            target_hit = False
+            stop_hit = False
 
-        if pos['signal'] == 'buy':
-            if current_candle['high'] >= pos['target_price']:
-                target_hit = True
-                exit_price = pos['target_price']
-            elif current_candle['low'] <= pos['stop_loss']:
-                stop_hit = True
-                exit_price = pos['stop_loss']
-        else:  # sell
-            if current_candle['low'] <= pos['target_price']:
-                target_hit = True
-                exit_price = pos['target_price']
-            elif current_candle['high'] >= pos['stop_loss']:
-                stop_hit = True
-                exit_price = pos['stop_loss']
+            if pos['signal'] == 'buy':
+                if current_candle['high'] >= pos['target_price']:
+                    target_hit = True
+                    exit_price = pos['target_price']
+                elif current_candle['low'] <= pos['stop_loss']:
+                    stop_hit = True
+                    exit_price = pos['stop_loss']
+            else:  # sell
+                if current_candle['low'] <= pos['target_price']:
+                    target_hit = True
+                    exit_price = pos['target_price']
+                elif current_candle['high'] >= pos['stop_loss']:
+                    stop_hit = True
+                    exit_price = pos['stop_loss']
 
-        if target_hit or stop_hit:
-            self.close_trade(exit_price, current_candle.name, target_hit)
+            if target_hit or stop_hit:
+                self.close_trade(pos, exit_price, current_candle.name, target_hit)
 
-    def close_trade(self, exit_price: float, exit_time: pd.Timestamp, won: bool):
+    def close_trade(self, position: Dict, exit_price: float, exit_time: pd.Timestamp, won: bool):
         """
         بستن معامله
 
         Args:
+            position: پوزیشن مورد نظر
             exit_price: قیمت خروج
             exit_time: زمان خروج
             won: آیا سودآور بود
         """
-        if not self.open_position:
-            return
-
-        pos = self.open_position
-
         # محاسبه سود/ضرر
-        if pos['signal'] == 'buy':
-            pnl = (exit_price - pos['entry_price']) * pos['position_size']
+        if position['signal'] == 'buy':
+            pnl = (exit_price - position['entry_price']) * position['position_size']
         else:  # sell
-            pnl = (pos['entry_price'] - exit_price) * pos['position_size']
+            pnl = (position['entry_price'] - exit_price) * position['position_size']
 
         pnl_pct = (pnl / self.balance) * 100
 
@@ -412,7 +409,7 @@ class SessionBacktest:
 
         # ثبت معامله
         trade_record = {
-            **pos,
+            **position,
             'exit_price': exit_price,
             'exit_time': exit_time,
             'pnl': pnl,
@@ -428,29 +425,34 @@ class SessionBacktest:
         if won:
             self.winning_trades += 1
             self.total_profit += pnl
-            print(f"✅ سود: ${pnl:,.2f} ({pnl_pct:.2f}%) | موجودی: ${self.balance:,.2f}")
         else:
             self.losing_trades += 1
             self.total_loss += abs(pnl)
+
+        # چاپ نتیجه (بر اساس pnl واقعی، نه won)
+        if pnl > 0:
+            print(f"✅ سود: ${pnl:,.2f} ({pnl_pct:.2f}%) | موجودی: ${self.balance:,.2f}")
+        else:
             print(f"❌ ضرر: ${pnl:,.2f} ({pnl_pct:.2f}%) | موجودی: ${self.balance:,.2f}")
 
         # حذف سوئینگ تاچ شده
         if won:
-            swing_type = 'high' if pos['signal'] == 'buy' else 'low'
+            swing_type = 'high' if position['signal'] == 'buy' else 'low'
             # پیدا کردن سشن قبلی
             session_order = ['tokyo', 'london', 'newyork']
-            current_idx = session_order.index(pos['session'])
+            current_idx = session_order.index(position['session'])
             previous_idx = (current_idx - 1) % 3
             previous_session = session_order[previous_idx]
 
             self.swing_manager.remove_touched_swing(
                 previous_session,
                 swing_type,
-                pos['target_price']
+                position['target_price']
             )
 
-        # پاک کردن پوزیشن
-        self.open_position = None
+        # حذف از لیست پوزیشن‌ها
+        if position in self.open_positions:
+            self.open_positions.remove(position)
 
     def run_backtest(self, df: pd.DataFrame):
         """
@@ -501,12 +503,12 @@ class SessionBacktest:
                     'volume': candle['volume']
                 }
 
-            # بررسی پوزیشن باز
-            if self.open_position:
+            # بررسی پوزیشن‌های باز
+            if self.open_positions:
                 self.check_position(candle)
 
             # اگر پوزیشن باز نداریم، به دنبال سیگنال باش
-            if not self.open_position:
+            if not self.open_positions:
                 # بررسی overlap
                 in_overlap, overlap_info = self.is_in_overlap(timestamp)
 
@@ -539,48 +541,58 @@ class SessionBacktest:
                         current_price = candle['close']
 
                         signal = None
-                        target_swing = None
+                        target_swings = []
 
-                        # استراتژی Counter-Trend
+                        # استراتژی Counter-Trend - انتخاب همه سوئینگ‌های مناسب
                         if trend == 'bullish':
                             # روند صعودی در overlap بود → الان فروش
                             signal = 'sell'
                             print(f"   → سیگنال: SELL (counter-trend)")
-                            target_swing = self.swing_manager.find_nearest_target(
-                                current_price, previous_swings['lows'], 'sell'
-                            )
+                            # انتخاب همه سوئینگ lows که در محدوده فاصله مجاز هستند
+                            target_swings = previous_swings['lows']
                         elif trend == 'bearish':
                             # روند نزولی در overlap بود → الان خرید
                             signal = 'buy'
                             print(f"   → سیگنال: BUY (counter-trend)")
-                            target_swing = self.swing_manager.find_nearest_target(
-                                current_price, previous_swings['highs'], 'buy'
-                            )
+                            # انتخاب همه سوئینگ highs که در محدوده فاصله مجاز هستند
+                            target_swings = previous_swings['highs']
 
-                        if target_swing:
-                            # بررسی فاصله تارگت (نباید خیلی دور باشد)
-                            target_distance_pct = abs(target_swing['price'] - current_price) / current_price
+                        if target_swings:
+                            # فیلتر کردن سوئینگ‌ها بر اساس فاصله
+                            valid_swings = []
+                            for swing in target_swings:
+                                distance_pct = abs(swing['price'] - current_price) / current_price
+                                if distance_pct <= config.MAX_TARGET_DISTANCE:
+                                    valid_swings.append(swing)
 
-                            if target_distance_pct <= config.MAX_TARGET_DISTANCE:
-                                # محاسبه استاپ لاس
+                            if valid_swings:
+                                num_positions = len(valid_swings)
+                                print(f"   📊 {num_positions} سوئینگ مناسب پیدا شد - باز کردن {num_positions} پوزیشن")
+
+                                # محاسبه استاپ لاس مشترک
                                 stop_loss = self.calculate_stop_loss(
                                     current_price,
                                     signal,
                                     df.iloc[:idx+1]
                                 )
 
-                                # باز کردن معامله
-                                self.open_trade(
-                                    signal,
-                                    current_price,
-                                    target_swing['price'],
-                                    stop_loss,
-                                    current_session,
-                                    trend,
-                                    timestamp
-                                )
+                                # باز کردن یک پوزیشن جداگانه برای هر سوئینگ
+                                print(f"\n{'🟢 خرید' if signal == 'buy' else '🔴 فروش'} | "
+                                      f"قیمت: ${current_price:,.5f} | SL: ${stop_loss:,.5f}")
+                                for i, swing in enumerate(valid_swings, 1):
+                                    print(f"   {i}. TP: ${swing['price']:,.5f}")
+                                    self.open_trade(
+                                        signal,
+                                        current_price,
+                                        swing['price'],
+                                        stop_loss,
+                                        current_session,
+                                        trend,
+                                        timestamp,
+                                        num_positions  # تعداد کل پوزیشن‌ها
+                                    )
                             else:
-                                print(f"   ⚠️  تارگت خیلی دور است ({target_distance_pct*100:.1f}%) - معامله نکن")
+                                print(f"   ⚠️  همه تارگت‌ها خیلی دور هستند (>{config.MAX_TARGET_DISTANCE*100:.0f}%) - معامله نکن")
 
                     # ریست کردن وضعیت overlap
                     self.was_in_overlap = False
