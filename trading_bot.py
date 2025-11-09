@@ -48,6 +48,12 @@ class TradingBot:
         # پوزیشن‌های باز
         self.open_positions = []
 
+        # متغیرهای استراتژی جدید: تشخیص روند در overlap
+        self.was_in_overlap = False
+        self.overlap_trend = None
+        self.overlap_trend_strength = 0
+        self.overlap_df = None  # DataFrame برای استفاده بعد از overlap
+
         # حالت آزمایشی
         self.test_mode = config.TEST_MODE
         if self.test_mode:
@@ -474,23 +480,61 @@ class TradingBot:
         """اجرای یک چرخه کامل ربات"""
         try:
             # بررسی سشن‌ها
-            should_trade, overlap_info = self.session_manager.should_trade()
+            in_overlap, overlap_info = self.session_manager.should_trade()
 
-            if should_trade:
+            # مرحله 1: اگر در overlap هستیم، فقط روند را شناسایی و ذخیره کن (معامله نکن!)
+            if in_overlap:
                 logger.info(f"📍 همپوشانی فعال: {overlap_info['name']}")
 
                 # دریافت داده‌های بازار
                 df = self.fetch_ohlcv()
 
                 if df is not None:
-                    # تحلیل بازار
-                    signal, swing_info = self.analyze_market(df, overlap_info)
+                    # بروزرسانی سوئینگ‌های سشن فعلی
+                    current_session = self.get_current_session()
+                    if current_session:
+                        self.swing_manager.update_session_swings(current_session, df)
+
+                    # تشخیص روند در طول overlap
+                    trend, trend_strength = self.detect_trend(df)
+
+                    # ذخیره روند برای استفاده بعد از overlap
+                    self.overlap_trend = trend
+                    self.overlap_trend_strength = trend_strength
+                    self.overlap_df = df
+                    self.was_in_overlap = True
+
+                    logger.info(f"   📊 روند در overlap: {trend.upper()} ({trend_strength:.2f}%)")
+                    logger.debug("   ⏳ منتظر خروج از overlap...")
+
+            # مرحله 2: اگر از overlap خارج شدیم، الان معامله کن!
+            elif not in_overlap and self.was_in_overlap:
+                logger.info("🔔 خروج از overlap - سشن جدید شروع شد")
+
+                # استفاده از روند ذخیره شده
+                trend = self.overlap_trend
+                trend_strength = self.overlap_trend_strength
+                df = self.overlap_df
+
+                if df is not None and trend and trend != 'neutral' and trend_strength >= config.MIN_PRICE_CHANGE:
+                    # تحلیل بازار و تولید سیگنال
+                    signal, swing_info = self.analyze_market(df, {'name': 'post-overlap'})
 
                     # اجرای معامله
                     if signal and swing_info:
+                        logger.info(f"   ✅ معامله بر اساس روند overlap: {trend.upper()}")
                         self.execute_trade(signal, df)
                     else:
-                        logger.debug("سیگنال معاملاتی پیدا نشد (هیچ سوئینگی تاچ نشده)")
+                        logger.debug("   ⚠️  سیگنال معاملاتی پیدا نشد (هیچ سوئینگی مناسب نبود)")
+                else:
+                    logger.debug("   ⚠️  روند ضعیف یا خنثی - معامله نکن")
+
+                # ریست کردن وضعیت overlap
+                self.was_in_overlap = False
+                self.overlap_trend = None
+                self.overlap_trend_strength = 0
+                self.overlap_df = None
+
             else:
                 logger.debug("خارج از زمان همپوشانی سشن‌ها")
 

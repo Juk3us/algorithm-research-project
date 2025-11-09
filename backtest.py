@@ -49,6 +49,11 @@ class SessionBacktest:
         self.total_profit = 0
         self.total_loss = 0
 
+        # متغیرهای استراتژی جدید: تشخیص روند در overlap
+        self.was_in_overlap = False
+        self.overlap_trend = None
+        self.overlap_trend_strength = 0
+
         # راه‌اندازی صرافی
         # سعی برای استفاده از صرافی‌های مختلف
         self.exchange = None
@@ -505,11 +510,30 @@ class SessionBacktest:
                 # بررسی overlap
                 in_overlap, overlap_info = self.is_in_overlap(timestamp)
 
+                # مرحله 1: اگر در overlap هستیم، فقط روند را شناسایی و ذخیره کن (معامله نکن!)
                 if in_overlap and current_session:
-                    # تشخیص روند
+                    # تشخیص روند در طول overlap
                     trend, trend_strength = self.detect_trend(df, idx)
 
-                    if trend != 'neutral' and trend_strength >= config.MIN_PRICE_CHANGE:
+                    # ذخیره روند برای استفاده بعد از overlap
+                    self.overlap_trend = trend
+                    self.overlap_trend_strength = trend_strength
+                    self.was_in_overlap = True
+
+                    # ادامه به کندل بعدی - هنوز معامله نکن!
+
+                # مرحله 2: اگر از overlap خارج شدیم، الان معامله کن!
+                elif not in_overlap and self.was_in_overlap and current_session:
+                    # از overlap خارج شدیم و سشن جدید شروع شده
+                    print(f"\n🔔 خروج از overlap - سشن {current_session.upper()} شروع شد")
+
+                    # از روند ذخیره شده استفاده کن
+                    trend = self.overlap_trend
+                    trend_strength = self.overlap_trend_strength
+
+                    if trend and trend != 'neutral' and trend_strength >= config.MIN_PRICE_CHANGE:
+                        print(f"   روند در overlap: {trend.upper()} ({trend_strength:.2f}%)")
+
                         # دریافت سوئینگ‌های سشن قبلی
                         previous_swings = self.swing_manager.get_previous_session_swings(current_session)
                         current_price = candle['close']
@@ -517,15 +541,18 @@ class SessionBacktest:
                         signal = None
                         target_swing = None
 
+                        # استراتژی Counter-Trend
                         if trend == 'bullish':
-                            # روند صعودی → فروش
+                            # روند صعودی در overlap بود → الان فروش
                             signal = 'sell'
+                            print(f"   → سیگنال: SELL (counter-trend)")
                             target_swing = self.swing_manager.find_nearest_target(
                                 current_price, previous_swings['lows'], 'sell'
                             )
                         elif trend == 'bearish':
-                            # روند نزولی → خرید
+                            # روند نزولی در overlap بود → الان خرید
                             signal = 'buy'
+                            print(f"   → سیگنال: BUY (counter-trend)")
                             target_swing = self.swing_manager.find_nearest_target(
                                 current_price, previous_swings['highs'], 'buy'
                             )
@@ -552,9 +579,13 @@ class SessionBacktest:
                                     trend,
                                     timestamp
                                 )
-                            # else:
-                            #     # تارگت خیلی دور است، معامله نکن
-                            #     pass
+                            else:
+                                print(f"   ⚠️  تارگت خیلی دور است ({target_distance_pct*100:.1f}%) - معامله نکن")
+
+                    # ریست کردن وضعیت overlap
+                    self.was_in_overlap = False
+                    self.overlap_trend = None
+                    self.overlap_trend_strength = 0
 
         # بستن سشن آخر
         if current_session and len(session_data) > 0:
