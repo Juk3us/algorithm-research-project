@@ -19,15 +19,17 @@ from swing_detector import SessionSwingManager
 class SessionBacktest:
     """بک‌تست استراتژی بر اساس سوئینگ‌های سشن"""
 
-    def __init__(self, initial_balance: float = 1000.0):
+    def __init__(self, initial_balance: float = 1000.0, symbol: str = None):
         """
         مقداردهی اولیه
 
         Args:
             initial_balance: موجودی اولیه برای تست
+            symbol: نماد معاملاتی (پیش‌فرض: از config)
         """
         self.initial_balance = initial_balance
         self.balance = initial_balance
+        self.symbol = symbol or config.MARKET_SYMBOL
         self.session_manager = SessionManager()
         self.swing_manager = SessionSwingManager(persistence_file='backtest_swings.json')
 
@@ -82,7 +84,7 @@ class SessionBacktest:
 
                 # دریافت داده‌ها
                 ohlcv = self.exchange.fetch_ohlcv(
-                    config.MARKET_SYMBOL,
+                    self.symbol,
                     config.CHART_TIMEFRAME,
                     since=since,
                     limit=1000
@@ -129,8 +131,23 @@ class SessionBacktest:
         # تولید زمان‌ها
         timestamps = pd.date_range(start=start_time, end=end_time, periods=total_candles)
 
-        # قیمت پایه BTC
-        base_price = 90000.0
+        # تشخیص نوع نماد و قیمت پایه
+        if 'BTC' in self.symbol or 'bitcoin' in self.symbol.lower():
+            base_price = 90000.0
+            min_price = 60000
+            max_price = 120000
+            volatility = 0.01  # 1%
+        elif 'AUD' in self.symbol or 'aud' in self.symbol.lower():
+            base_price = 0.65  # AUD/USD معمولاً بین 0.6-0.8
+            min_price = 0.55
+            max_price = 0.75
+            volatility = 0.005  # 0.5% - فارکس کمتر نوسان دارد
+        else:
+            # پیش‌فرض برای ارزهای دیگر
+            base_price = 1.0
+            min_price = 0.5
+            max_price = 2.0
+            volatility = 0.01
 
         # تولید قیمت‌ها با روند تصادفی
         np.random.seed(42)  # برای قابل تکرار بودن
@@ -139,11 +156,11 @@ class SessionBacktest:
 
         for i in range(total_candles):
             # حرکت تصادفی با bias کمی صعودی
-            change_pct = np.random.normal(0.001, 0.01)  # 0.1% mean, 1% std
+            change_pct = np.random.normal(0.0001, volatility)
             current_price = current_price * (1 + change_pct)
 
             # جلوگیری از قیمت‌های غیرواقعی
-            current_price = max(60000, min(120000, current_price))
+            current_price = max(min_price, min(max_price, current_price))
 
             prices.append(current_price)
 
@@ -167,7 +184,14 @@ class SessionBacktest:
 
         df = pd.DataFrame(data, index=timestamps)
         print(f"✅ تولید {len(df)} کندل شبیه‌سازی شده از {df.index[0]} تا {df.index[-1]}")
-        print(f"   قیمت شروع: ${df['close'].iloc[0]:,.2f} | قیمت پایان: ${df['close'].iloc[-1]:,.2f}")
+
+        # فرمت قیمت بر اساس نوع نماد
+        if 'AUD' in self.symbol or 'EUR' in self.symbol or 'GBP' in self.symbol:
+            # فارکس - 5 رقم اعشار
+            print(f"   قیمت شروع: {df['close'].iloc[0]:.5f} | قیمت پایان: {df['close'].iloc[-1]:.5f}")
+        else:
+            # کریپتو - 2 رقم اعشار
+            print(f"   قیمت شروع: ${df['close'].iloc[0]:,.2f} | قیمت پایان: ${df['close'].iloc[-1]:,.2f}")
 
         return df
 
@@ -616,16 +640,27 @@ class SessionBacktest:
         print(f"\n💾 نتایج در فایل backtest_results.json ذخیره شد")
 
 
-def main():
-    """تابع اصلی"""
+def main(symbol: str = None, days: int = 10):
+    """
+    تابع اصلی
+
+    Args:
+        symbol: نماد معاملاتی (پیش‌فرض: از config)
+        days: تعداد روزهای گذشته
+    """
+    symbol = symbol or config.MARKET_SYMBOL
+
     print("🔬 بک‌تست استراتژی سوئینگ‌های سشن")
+    print("=" * 80)
+    print(f"📊 نماد: {symbol}")
+    print(f"📅 دوره: {days} روز گذشته")
     print("=" * 80)
 
     # ایجاد نمونه
-    backtest = SessionBacktest(initial_balance=1000.0)
+    backtest = SessionBacktest(initial_balance=1000.0, symbol=symbol)
 
-    # دریافت داده‌های تاریخی (10 روز)
-    df = backtest.fetch_historical_data(days=10)
+    # دریافت داده‌های تاریخی
+    df = backtest.fetch_historical_data(days=days)
 
     if df is None or len(df) == 0:
         print("❌ خطا در دریافت داده‌ها")
@@ -639,4 +674,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    # دریافت نماد از خط فرمان
+    symbol = sys.argv[1] if len(sys.argv) > 1 else None
+    days = int(sys.argv[2]) if len(sys.argv) > 2 else 10
+
+    main(symbol=symbol, days=days)
