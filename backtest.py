@@ -412,7 +412,7 @@ class SessionBacktest:
             signal: 'buy' یا 'sell'
             entry_price: قیمت ورود
             targets: لیست قیمت‌های تارگت (مرتب شده)
-            stop_loss: قیمت استاپ لاس
+            stop_loss: قیمت استاپ لاس (اگر None باشد، بدون SL)
             session: سشن فعلی
             trend: روند در overlap
             timestamp: زمان ورود
@@ -422,22 +422,16 @@ class SessionBacktest:
             print("   ⚠️  هیچ تارگتی یافت نشد - معامله باز نمی‌شود")
             return
 
-        # محاسبه ریسک کل
-        if signal == 'buy':
-            total_risk = entry_price - stop_loss
-        else:  # sell
-            total_risk = stop_loss - entry_price
+        # محاسبه حجم کل بر اساس ریسک ثابت (بدون SL)
+        # استفاده از 50% از موجودی برای کل معامله (بدون SL نیاز به سرمایه بیشتر)
+        total_risk_amount = self.balance * 0.5
 
-        if total_risk <= 0:
-            return
-
-        # محاسبه حجم کل بر اساس ریسک
-        total_risk_amount = self.balance * config.MAX_TRADE_RISK
-        total_position_size = total_risk_amount / total_risk
+        # تبدیل به تعداد واحد (coin/token) بر اساس قیمت ورود
+        total_position_size_in_coins = total_risk_amount / entry_price
 
         # تقسیم به چند لات
         num_lots = len(targets)
-        lot_size = total_position_size / num_lots
+        lot_size = total_position_size_in_coins / num_lots
 
         if lot_size <= 0:
             return
@@ -453,7 +447,7 @@ class SessionBacktest:
                 'signal': signal,
                 'entry_price': entry_price,
                 'target_price': target,
-                'stop_loss': stop_loss,
+                'stop_loss': stop_loss,  # None یا قیمت SL
                 'position_size': lot_size,
                 'lot_number': i + 1,
                 'total_lots': num_lots,
@@ -461,17 +455,16 @@ class SessionBacktest:
                 'session': session,
                 'trend': trend,
                 'phase': phase,  # counter-trend یا reversal
-                'risk': total_risk,
                 'reward': reward,
-                'risk_reward_ratio': reward / total_risk if total_risk > 0 else 0
             }
             self.open_positions.append(position)
 
+        sl_text = "بدون SL" if stop_loss is None else f"SL: ${stop_loss:,.5f}"
         print(f"\n{'🟢 خرید' if signal == 'buy' else '🔴 فروش'} | "
               f"فاز: {phase} | "
               f"ورود: ${entry_price:,.5f} | "
               f"تعداد لات: {num_lots} | "
-              f"SL: ${stop_loss:,.5f}")
+              f"{sl_text}")
         print(f"   تارگت‌ها: {[f'${t:,.5f}' for t in targets]}")
 
     def check_position(self, current_candle: pd.Series):
@@ -497,8 +490,8 @@ class SessionBacktest:
                 if current_candle['high'] >= position['target_price']:
                     target_hit = True
                     exit_price = position['target_price']
-                # بررسی stop loss
-                elif current_candle['low'] <= position['stop_loss']:
+                # بررسی stop loss (فقط اگر SL تعریف شده باشد)
+                elif position['stop_loss'] is not None and current_candle['low'] <= position['stop_loss']:
                     stop_hit = True
                     exit_price = position['stop_loss']
             else:  # sell
@@ -506,8 +499,8 @@ class SessionBacktest:
                 if current_candle['low'] <= position['target_price']:
                     target_hit = True
                     exit_price = position['target_price']
-                # بررسی stop loss
-                elif current_candle['high'] >= position['stop_loss']:
+                # بررسی stop loss (فقط اگر SL تعریف شده باشد)
+                elif position['stop_loss'] is not None and current_candle['high'] >= position['stop_loss']:
                     stop_hit = True
                     exit_price = position['stop_loss']
 
@@ -612,8 +605,8 @@ class SessionBacktest:
             print(f"   ⚠️  هیچ تارگتی برای فاز Reversal یافت نشد")
             return
 
-        # محاسبه Stop Loss (درصدی از قیمت ورود)
-        stop_loss = self.calculate_stop_loss(entry_price, signal)
+        # بدون Stop Loss
+        stop_loss = None
 
         # باز کردن معامله reversal
         self.open_trade(
@@ -753,8 +746,8 @@ class SessionBacktest:
                                 if len(valid_targets) > 0:
                                     print(f"   📊 {len(valid_targets)} تارگت یافت شد")
 
-                                    # محاسبه استاپ لاس (درصدی از قیمت ورود)
-                                    stop_loss = self.calculate_stop_loss(current_price, signal)
+                                    # بدون Stop Loss
+                                    stop_loss = None
 
                                     # باز کردن معامله با چند لات
                                     self.open_trade(
