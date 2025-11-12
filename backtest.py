@@ -328,36 +328,26 @@ class SessionBacktest:
 
         return targets
 
-    def calculate_stop_loss(self, entry_price: float, direction: str, previous_session_data: pd.DataFrame) -> float:
+    def calculate_stop_loss(self, entry_price: float, direction: str) -> float:
         """
-        محاسبه استاپ لاس بر اساس High/Low سشن قبلی
+        محاسبه استاپ لاس به صورت درصدی از قیمت ورود
 
         Args:
             entry_price: قیمت ورود
             direction: جهت معامله ('buy' یا 'sell')
-            previous_session_data: داده‌های سشن قبلی
 
         Returns:
             قیمت استاپ لاس
         """
-        if previous_session_data is None or len(previous_session_data) == 0:
-            # اگر داده سشن قبلی نداریم، از 2% فالبک استفاده کن
-            buffer = entry_price * 0.02
-            if direction == 'buy':
-                return entry_price - buffer
-            else:
-                return entry_price + buffer
+        # Stop Loss درصدی (از config)
+        stop_loss_pct = config.MAX_TRADE_RISK  # 5% = 0.05
 
         if direction == 'buy':
-            # برای خرید: stop loss پایین‌تر از پایین‌ترین قیمت سشن قبلی
-            session_low = previous_session_data['low'].min()
-            buffer = session_low * 0.001  # 0.1% بافر
-            stop_loss = session_low - buffer
+            # برای خرید: SL پایین‌تر از قیمت ورود
+            stop_loss = entry_price * (1 - stop_loss_pct)
         else:  # sell
-            # برای فروش: stop loss بالاتر از بالاترین قیمت سشن قبلی
-            session_high = previous_session_data['high'].max()
-            buffer = session_high * 0.001  # 0.1% بافر
-            stop_loss = session_high + buffer
+            # برای فروش: SL بالاتر از قیمت ورود
+            stop_loss = entry_price * (1 + stop_loss_pct)
 
         return stop_loss
 
@@ -566,12 +556,8 @@ class SessionBacktest:
             print(f"   ⚠️  هیچ تارگتی برای فاز Reversal یافت نشد")
             return
 
-        # محاسبه Stop Loss (از داده سشن قبلی - باید از متغیر ذخیره شده استفاده کنیم)
-        # فعلاً از یک فالبک استفاده می‌کنیم
-        if signal == 'buy':
-            stop_loss = entry_price * 0.98  # 2% پایین‌تر
-        else:
-            stop_loss = entry_price * 1.02  # 2% بالاتر
+        # محاسبه Stop Loss (درصدی از قیمت ورود)
+        stop_loss = self.calculate_stop_loss(entry_price, signal)
 
         # باز کردن معامله reversal
         self.open_trade(
@@ -711,15 +697,8 @@ class SessionBacktest:
                                 if len(valid_targets) > 0:
                                     print(f"   📊 {len(valid_targets)} تارگت یافت شد")
 
-                                    # دریافت داده‌های سشن قبلی برای محاسبه SL
-                                    previous_session_data = df[df.index < timestamp].tail(50) if len(df) > 50 else df[df.index < timestamp]
-
-                                    # محاسبه استاپ لاس بر اساس سشن قبلی
-                                    stop_loss = self.calculate_stop_loss(
-                                        current_price,
-                                        signal,
-                                        previous_session_data
-                                    )
+                                    # محاسبه استاپ لاس (درصدی از قیمت ورود)
+                                    stop_loss = self.calculate_stop_loss(current_price, signal)
 
                                     # باز کردن معامله با چند لات
                                     self.open_trade(
