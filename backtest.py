@@ -605,6 +605,25 @@ class SessionBacktest:
             print(f"   ⚠️  هیچ تارگتی برای فاز Reversal یافت نشد")
             return
 
+        # فیلتر تارگت‌های صحیح بر اساس جهت معامله
+        valid_targets = []
+        for target in targets:
+            # برای SELL: target باید پایین‌تر از قیمت ورود باشد
+            # برای BUY: target باید بالاتر از قیمت ورود باشد
+            if signal == 'sell' and target >= entry_price:
+                continue
+            if signal == 'buy' and target <= entry_price:
+                continue
+
+            # بررسی فاصله
+            distance_pct = abs(target - entry_price) / entry_price
+            if distance_pct <= config.MAX_TARGET_DISTANCE:
+                valid_targets.append(target)
+
+        if len(valid_targets) == 0:
+            print(f"   ⚠️  هیچ تارگت صحیحی برای فاز Reversal یافت نشد")
+            return
+
         # بدون Stop Loss
         stop_loss = None
 
@@ -612,7 +631,7 @@ class SessionBacktest:
         self.open_trade(
             signal=signal,
             entry_price=entry_price,
-            targets=targets,
+            targets=valid_targets,
             stop_loss=stop_loss,
             session='reversal',
             trend='reversal',
@@ -736,9 +755,17 @@ class SessionBacktest:
                             targets = self.get_targets_from_previous_sessions(signal)
 
                             if len(targets) > 0:
-                                # فیلتر تارگت‌هایی که خیلی دور هستند
+                                # فیلتر تارگت‌های صحیح بر اساس جهت معامله
                                 valid_targets = []
                                 for target in targets:
+                                    # برای SELL: target باید پایین‌تر از قیمت ورود باشد
+                                    # برای BUY: target باید بالاتر از قیمت ورود باشد
+                                    if signal == 'sell' and target >= current_price:
+                                        continue  # skip این target
+                                    if signal == 'buy' and target <= current_price:
+                                        continue  # skip این target
+
+                                    # بررسی فاصله
                                     distance_pct = abs(target - current_price) / current_price
                                     if distance_pct <= config.MAX_TARGET_DISTANCE:
                                         valid_targets.append(target)
