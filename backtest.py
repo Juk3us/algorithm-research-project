@@ -483,9 +483,17 @@ class SessionBacktest:
         for i, position in enumerate(self.open_positions):
             target_hit = False
             stop_hit = False
+            timeout_close = False
             exit_price = None
 
-            if position['signal'] == 'buy':
+            # بررسی timeout: اگر پوزیشن بیش از 48 ساعت باز بود، ببند
+            time_open = (current_candle.name - position['entry_time']).total_seconds() / 3600  # ساعت
+            if time_open > 48:  # 48 ساعت = 2 روز
+                timeout_close = True
+                exit_price = current_candle['close']
+                print(f"   ⏱️  لات {position['lot_number']}/{position['total_lots']} timeout ({time_open:.1f}h) - بستن در ${exit_price:,.5f}")
+
+            elif position['signal'] == 'buy':
                 # بررسی target hit
                 if current_candle['high'] >= position['target_price']:
                     target_hit = True
@@ -504,7 +512,7 @@ class SessionBacktest:
                     stop_hit = True
                     exit_price = position['stop_loss']
 
-            if target_hit or stop_hit:
+            if target_hit or stop_hit or timeout_close:
                 positions_to_close.append((i, exit_price, current_candle.name, target_hit))
 
         # بستن پوزیشن‌هایی که به تارگت یا SL رسیدند
