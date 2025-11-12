@@ -40,7 +40,7 @@ class SessionBacktest:
 
         # معاملات
         self.trades = []
-        self.open_position = None  # فقط یک پوزیشن در هر زمان
+        self.open_positions = []  # چند پوزیشن (multi-lot)
 
         # آمار
         self.total_trades = 0
@@ -49,10 +49,17 @@ class SessionBacktest:
         self.total_profit = 0
         self.total_loss = 0
 
-        # متغیرهای استراتژی جدید: تشخیص روند در overlap
+        # متغیرهای استراتژی: تشخیص روند در overlap و فازبندی
         self.was_in_overlap = False
         self.overlap_trend = None
         self.overlap_trend_strength = 0
+
+        # Phase tracking: 'counter-trend' یا 'reversal'
+        self.current_phase = 'counter-trend'
+        self.phase1_complete = False  # آیا فاز 1 (counter-trend) تمام شد؟
+
+        # تاریخچه سشن‌ها برای گرفتن swings از دو سشن قبل
+        self.session_history = []  # هر کدام: {'session': 'tokyo', 'swings': {...}}
 
         # راه‌اندازی صرافی
         # سعی برای استفاده از صرافی‌های مختلف
@@ -282,123 +289,208 @@ class SessionBacktest:
         else:
             return 'neutral', 0
 
-    def calculate_stop_loss(self, entry_price: float, direction: str, df: pd.DataFrame) -> float:
+    def get_targets_from_previous_sessions(self, signal: str) -> List[float]:
         """
-        محاسبه استاپ لاس با ATR
+        دریافت تارگت‌ها از دو سشن قبلی
+
+        Args:
+            signal: 'buy' یا 'sell'
+
+        Returns:
+            لیست قیمت‌های تارگت (مرتب شده)
+        """
+        targets = []
+
+        # بررسی دو سشن آخر
+        sessions_to_check = self.session_history[-2:] if len(self.session_history) >= 2 else self.session_history
+
+        for session_data in sessions_to_check:
+            swings = session_data.get('swings', {})
+
+            if signal == 'sell':
+                # برای فروش: همه Lows
+                swing_lows = swings.get('lows', [])
+                for swing in swing_lows:
+                    targets.append(swing['price'])
+            else:  # buy
+                # برای خرید: همه Highs
+                swing_highs = swings.get('highs', [])
+                for swing in swing_highs:
+                    targets.append(swing['price'])
+
+        # مرتب‌سازی
+        if signal == 'sell':
+            # برای sell: از بالا به پایین (نزدیک‌ترین به دورترین)
+            targets.sort(reverse=True)
+        else:
+            # برای buy: از پایین به بالا (نزدیک‌ترین به دورترین)
+            targets.sort()
+
+        return targets
+
+    def calculate_stop_loss(self, entry_price: float, direction: str, previous_session_data: pd.DataFrame) -> float:
+        """
+        محاسبه استاپ لاس بر اساس High/Low سشن قبلی
 
         Args:
             entry_price: قیمت ورود
-            direction: جهت معامله
-            df: DataFrame
+            direction: جهت معامله ('buy' یا 'sell')
+            previous_session_data: داده‌های سشن قبلی
 
         Returns:
             قیمت استاپ لاس
         """
-        # محاسبه ATR
-        high_low = df['high'] - df['low']
-        high_close = np.abs(df['high'] - df['close'].shift())
-        low_close = np.abs(df['low'] - df['close'].shift())
-
-        true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-        atr = true_range.rolling(config.ATR_PERIOD).mean().iloc[-1]
+        if previous_session_data is None or len(previous_session_data) == 0:
+            # اگر داده سشن قبلی نداریم، از 2% فالبک استفاده کن
+            buffer = entry_price * 0.02
+            if direction == 'buy':
+                return entry_price - buffer
+            else:
+                return entry_price + buffer
 
         if direction == 'buy':
-            stop_loss = entry_price - (atr * config.ATR_MULTIPLIER)
+            # برای خرید: stop loss پایین‌تر از پایین‌ترین قیمت سشن قبلی
+            session_low = previous_session_data['low'].min()
+            buffer = session_low * 0.001  # 0.1% بافر
+            stop_loss = session_low - buffer
         else:  # sell
-            stop_loss = entry_price + (atr * config.ATR_MULTIPLIER)
+            # برای فروش: stop loss بالاتر از بالاترین قیمت سشن قبلی
+            session_high = previous_session_data['high'].max()
+            buffer = session_high * 0.001  # 0.1% بافر
+            stop_loss = session_high + buffer
 
         return stop_loss
 
-    def open_trade(self, signal: str, entry_price: float, target_price: float,
-                   stop_loss: float, session: str, trend: str, timestamp: pd.Timestamp):
+    def open_trade(self, signal: str, entry_price: float, targets: List[float],
+                   stop_loss: float, session: str, trend: str, timestamp: pd.Timestamp, phase: str = 'counter-trend'):
         """
-        باز کردن معامله
+        باز کردن چند لات (یکی برای هر تارگت)
 
         Args:
             signal: 'buy' یا 'sell'
             entry_price: قیمت ورود
-            target_price: قیمت هدف
+            targets: لیست قیمت‌های تارگت (مرتب شده)
             stop_loss: قیمت استاپ لاس
             session: سشن فعلی
-            trend: روند
+            trend: روند در overlap
             timestamp: زمان ورود
+            phase: 'counter-trend' یا 'reversal'
         """
-        # محاسبه ریسک
-        if signal == 'buy':
-            risk = entry_price - stop_loss
-            reward = target_price - entry_price
-        else:  # sell
-            risk = stop_loss - entry_price
-            reward = entry_price - target_price
-
-        # محاسبه حجم معامله
-        risk_amount = self.balance * config.MAX_TRADE_RISK
-        position_size = risk_amount / risk if risk > 0 else 0
-
-        if position_size <= 0:
+        if len(targets) == 0:
+            print("   ⚠️  هیچ تارگتی یافت نشد - معامله باز نمی‌شود")
             return
 
-        self.open_position = {
-            'signal': signal,
-            'entry_price': entry_price,
-            'target_price': target_price,
-            'stop_loss': stop_loss,
-            'position_size': position_size,
-            'entry_time': timestamp,
-            'session': session,
-            'trend': trend,
-            'risk': risk,
-            'reward': reward,
-            'risk_reward_ratio': reward / risk if risk > 0 else 0
-        }
+        # محاسبه ریسک کل
+        if signal == 'buy':
+            total_risk = entry_price - stop_loss
+        else:  # sell
+            total_risk = stop_loss - entry_price
+
+        if total_risk <= 0:
+            return
+
+        # محاسبه حجم کل بر اساس ریسک
+        total_risk_amount = self.balance * config.MAX_TRADE_RISK
+        total_position_size = total_risk_amount / total_risk
+
+        # تقسیم به چند لات
+        num_lots = len(targets)
+        lot_size = total_position_size / num_lots
+
+        if lot_size <= 0:
+            return
+
+        # باز کردن یک لات برای هر تارگت
+        for i, target in enumerate(targets):
+            if signal == 'buy':
+                reward = target - entry_price
+            else:  # sell
+                reward = entry_price - target
+
+            position = {
+                'signal': signal,
+                'entry_price': entry_price,
+                'target_price': target,
+                'stop_loss': stop_loss,
+                'position_size': lot_size,
+                'lot_number': i + 1,
+                'total_lots': num_lots,
+                'entry_time': timestamp,
+                'session': session,
+                'trend': trend,
+                'phase': phase,  # counter-trend یا reversal
+                'risk': total_risk,
+                'reward': reward,
+                'risk_reward_ratio': reward / total_risk if total_risk > 0 else 0
+            }
+            self.open_positions.append(position)
+
+        print(f"\n{'🟢 خرید' if signal == 'buy' else '🔴 فروش'} | "
+              f"فاز: {phase} | "
+              f"ورود: ${entry_price:,.5f} | "
+              f"تعداد لات: {num_lots} | "
+              f"SL: ${stop_loss:,.5f}")
+        print(f"   تارگت‌ها: {[f'${t:,.5f}' for t in targets]}")
 
     def check_position(self, current_candle: pd.Series):
         """
-        بررسی پوزیشن باز
+        بررسی همه پوزیشن‌های باز و بستن تدریجی
 
         Args:
             current_candle: کندل فعلی
         """
-        if not self.open_position:
+        if len(self.open_positions) == 0:
             return
 
-        current_price = current_candle['close']
+        positions_to_close = []
 
-        # بررسی رسیدن به تارگت
-        target_hit = False
-        stop_hit = False
+        # بررسی هر لات
+        for i, position in enumerate(self.open_positions):
+            target_hit = False
+            stop_hit = False
+            exit_price = None
 
-        if self.open_position['signal'] == 'buy':
-            if current_candle['high'] >= self.open_position['target_price']:
-                target_hit = True
-                exit_price = self.open_position['target_price']
-            elif current_candle['low'] <= self.open_position['stop_loss']:
-                stop_hit = True
-                exit_price = self.open_position['stop_loss']
-        else:  # sell
-            if current_candle['low'] <= self.open_position['target_price']:
-                target_hit = True
-                exit_price = self.open_position['target_price']
-            elif current_candle['high'] >= self.open_position['stop_loss']:
-                stop_hit = True
-                exit_price = self.open_position['stop_loss']
+            if position['signal'] == 'buy':
+                # بررسی target hit
+                if current_candle['high'] >= position['target_price']:
+                    target_hit = True
+                    exit_price = position['target_price']
+                # بررسی stop loss
+                elif current_candle['low'] <= position['stop_loss']:
+                    stop_hit = True
+                    exit_price = position['stop_loss']
+            else:  # sell
+                # بررسی target hit
+                if current_candle['low'] <= position['target_price']:
+                    target_hit = True
+                    exit_price = position['target_price']
+                # بررسی stop loss
+                elif current_candle['high'] >= position['stop_loss']:
+                    stop_hit = True
+                    exit_price = position['stop_loss']
 
-        if target_hit or stop_hit:
-            self.close_trade(exit_price, current_candle.name, target_hit)
+            if target_hit or stop_hit:
+                positions_to_close.append((i, exit_price, current_candle.name, target_hit))
 
-    def close_trade(self, exit_price: float, exit_time: pd.Timestamp, won: bool):
+        # بستن پوزیشن‌هایی که به تارگت یا SL رسیدند
+        # از آخر به اول حذف می‌کنیم تا index ها قاطی نشوند
+        for i, exit_price, exit_time, won in reversed(positions_to_close):
+            self.close_single_lot(i, exit_price, exit_time, won)
+
+    def close_single_lot(self, index: int, exit_price: float, exit_time: pd.Timestamp, won: bool):
         """
-        بستن معامله
+        بستن یک لات
 
         Args:
+            index: شماره index لات در لیست
             exit_price: قیمت خروج
             exit_time: زمان خروج
-            won: آیا سودآور بود
+            won: آیا به target رسید (True) یا SL خورد (False)
         """
-        if not self.open_position:
+        if index >= len(self.open_positions):
             return
 
-        position = self.open_position
+        position = self.open_positions[index]
 
         # محاسبه سود/ضرر
         if position['signal'] == 'buy':
@@ -433,29 +525,65 @@ class SessionBacktest:
             self.losing_trades += 1
             self.total_loss += abs(pnl)
 
-        # چاپ نتیجه (بر اساس pnl واقعی، نه won)
-        if pnl > 0:
-            print(f"✅ سود: ${pnl:,.2f} ({pnl_pct:.2f}%) | موجودی: ${self.balance:,.2f}")
+        # چاپ نتیجه
+        result_emoji = "✅" if pnl > 0 else "❌"
+        print(f"{result_emoji} لات {position['lot_number']}/{position['total_lots']} | "
+              f"TP: ${exit_price:,.5f} | "
+              f"P/L: ${pnl:,.2f} ({pnl_pct:.2f}%) | "
+              f"موجودی: ${self.balance:,.2f}")
+
+        # حذف لات از لیست
+        phase_before_close = position['phase']
+        signal_before_close = position['signal']
+
+        del self.open_positions[index]
+
+        # بررسی: آیا همه لات‌ها بسته شدند؟
+        if len(self.open_positions) == 0:
+            print(f"\n   ✅ همه لات‌ها بسته شدند (فاز {phase_before_close})")
+
+            # اگر فاز counter-trend تمام شد، فاز reversal را شروع کن
+            if phase_before_close == 'counter-trend' and won:
+                print(f"   🔄 شروع فاز Reversal (معامله معکوس)")
+                # سیگنال معکوس
+                reversal_signal = 'buy' if signal_before_close == 'sell' else 'sell'
+                # از همان نقطه ورود کن
+                self.initiate_reversal_phase(reversal_signal, exit_price, exit_time)
+
+    def initiate_reversal_phase(self, signal: str, entry_price: float, timestamp: pd.Timestamp):
+        """
+        شروع فاز reversal (معامله معکوس بعد از تمام شدن فاز counter-trend)
+
+        Args:
+            signal: 'buy' یا 'sell' (معکوس سیگنال قبلی)
+            entry_price: قیمت ورود (همان نقطه خروج فاز 1)
+            timestamp: زمان ورود
+        """
+        # گرفتن تارگت‌های معکوس
+        targets = self.get_targets_from_previous_sessions(signal)
+
+        if len(targets) == 0:
+            print(f"   ⚠️  هیچ تارگتی برای فاز Reversal یافت نشد")
+            return
+
+        # محاسبه Stop Loss (از داده سشن قبلی - باید از متغیر ذخیره شده استفاده کنیم)
+        # فعلاً از یک فالبک استفاده می‌کنیم
+        if signal == 'buy':
+            stop_loss = entry_price * 0.98  # 2% پایین‌تر
         else:
-            print(f"❌ ضرر: ${pnl:,.2f} ({pnl_pct:.2f}%) | موجودی: ${self.balance:,.2f}")
+            stop_loss = entry_price * 1.02  # 2% بالاتر
 
-        # حذف سوئینگ تاچ شده
-        if won:
-            swing_type = 'high' if position['signal'] == 'buy' else 'low'
-            # پیدا کردن سشن قبلی
-            session_order = ['tokyo', 'london', 'newyork']
-            current_idx = session_order.index(position['session'])
-            previous_idx = (current_idx - 1) % 3
-            previous_session = session_order[previous_idx]
-
-            self.swing_manager.remove_touched_swing(
-                previous_session,
-                swing_type,
-                position['target_price']
-            )
-
-        # حذف پوزیشن
-        self.open_position = None
+        # باز کردن معامله reversal
+        self.open_trade(
+            signal=signal,
+            entry_price=entry_price,
+            targets=targets,
+            stop_loss=stop_loss,
+            session='reversal',
+            trend='reversal',
+            timestamp=timestamp,
+            phase='reversal'
+        )
 
     def run_backtest(self, df: pd.DataFrame):
         """
@@ -487,6 +615,18 @@ class SessionBacktest:
                 if current_session and len(session_data) > 0:
                     session_df = pd.DataFrame.from_dict(session_data, orient='index')
                     self.swing_manager.update_session_swings(current_session, session_df)
+
+                    # ذخیره swings در تاریخچه
+                    if current_session in self.swing_manager.session_swings:
+                        swings = self.swing_manager.session_swings[current_session]
+                        self.session_history.append({
+                            'session': current_session,
+                            'swings': swings
+                        })
+                        # نگه داشتن فقط 3 سشن آخر
+                        if len(self.session_history) > 3:
+                            self.session_history.pop(0)
+
                     session_count += 1
 
                     print(f"\n📊 سشن {session_count}: {current_session.upper()} "
@@ -506,12 +646,12 @@ class SessionBacktest:
                     'volume': candle['volume']
                 }
 
-            # بررسی پوزیشن باز
-            if self.open_position:
+            # بررسی پوزیشن‌های باز
+            if len(self.open_positions) > 0:
                 self.check_position(candle)
 
             # اگر پوزیشن باز نداریم، به دنبال سیگنال باش
-            if not self.open_position:
+            if len(self.open_positions) == 0:
                 # بررسی overlap
                 in_overlap, overlap_info = self.is_in_overlap(timestamp)
 
@@ -533,7 +673,7 @@ class SessionBacktest:
                     print(f"\n🔔 خروج از overlap - سشن {current_session.upper()} شروع شد")
 
                     # فقط اگر پوزیشن باز نداریم
-                    if self.open_position:
+                    if len(self.open_positions) > 0:
                         print(f"   ⚠️  پوزیشن باز وجود دارد - منتظر بسته شدن")
                         self.was_in_overlap = False
                         continue
@@ -545,64 +685,57 @@ class SessionBacktest:
                     if trend and trend != 'neutral' and trend_strength >= config.MIN_PRICE_CHANGE:
                         print(f"   روند در overlap: {trend.upper()} ({trend_strength:.2f}%)")
 
-                        # دریافت سوئینگ‌های سشن قبلی
-                        previous_swings = self.swing_manager.get_previous_session_swings(current_session)
                         current_price = candle['close']
-
                         signal = None
-                        target_swings = []
 
-                        # استراتژی Counter-Trend - انتخاب همه سوئینگ‌های مناسب
+                        # تعیین سیگنال
                         if trend == 'bullish':
-                            # روند صعودی در overlap بود → الان فروش
                             signal = 'sell'
                             print(f"   → سیگنال: SELL (counter-trend)")
-                            # انتخاب همه سوئینگ lows که در محدوده فاصله مجاز هستند
-                            target_swings = previous_swings['lows']
                         elif trend == 'bearish':
-                            # روند نزولی در overlap بود → الان خرید
                             signal = 'buy'
                             print(f"   → سیگنال: BUY (counter-trend)")
-                            # انتخاب همه سوئینگ highs که در محدوده فاصله مجاز هستند
-                            target_swings = previous_swings['highs']
 
-                        if target_swings:
-                            # فیلتر کردن سوئینگ‌ها بر اساس فاصله و پیدا کردن نزدیک‌ترین
-                            valid_swings = []
-                            for swing in target_swings:
-                                distance_pct = abs(swing['price'] - current_price) / current_price
-                                if distance_pct <= config.MAX_TARGET_DISTANCE:
-                                    swing['distance'] = abs(swing['price'] - current_price)
-                                    valid_swings.append(swing)
+                        if signal:
+                            # دریافت تارگت‌ها از دو سشن قبلی
+                            targets = self.get_targets_from_previous_sessions(signal)
 
-                            if valid_swings:
-                                # انتخاب نزدیک‌ترین سوئینگ
-                                closest_swing = min(valid_swings, key=lambda x: x['distance'])
+                            if len(targets) > 0:
+                                # فیلتر تارگت‌هایی که خیلی دور هستند
+                                valid_targets = []
+                                for target in targets:
+                                    distance_pct = abs(target - current_price) / current_price
+                                    if distance_pct <= config.MAX_TARGET_DISTANCE:
+                                        valid_targets.append(target)
 
-                                print(f"   📊 نزدیک‌ترین سوئینگ انتخاب شد")
+                                if len(valid_targets) > 0:
+                                    print(f"   📊 {len(valid_targets)} تارگت یافت شد")
 
-                                # محاسبه استاپ لاس
-                                stop_loss = self.calculate_stop_loss(
-                                    current_price,
-                                    signal,
-                                    df.iloc[:idx+1]
-                                )
+                                    # دریافت داده‌های سشن قبلی برای محاسبه SL
+                                    previous_session_data = df[df.index < timestamp].tail(50) if len(df) > 50 else df[df.index < timestamp]
 
-                                # باز کردن یک پوزیشن
-                                print(f"\n{'🟢 خرید' if signal == 'buy' else '🔴 فروش'} | "
-                                      f"ورود: ${current_price:,.5f} | TP: ${closest_swing['price']:,.5f} | SL: ${stop_loss:,.5f}")
+                                    # محاسبه استاپ لاس بر اساس سشن قبلی
+                                    stop_loss = self.calculate_stop_loss(
+                                        current_price,
+                                        signal,
+                                        previous_session_data
+                                    )
 
-                                self.open_trade(
-                                    signal,
-                                    current_price,
-                                    closest_swing['price'],
-                                    stop_loss,
-                                    current_session,
-                                    trend,
-                                    timestamp
-                                )
+                                    # باز کردن معامله با چند لات
+                                    self.open_trade(
+                                        signal=signal,
+                                        entry_price=current_price,
+                                        targets=valid_targets,
+                                        stop_loss=stop_loss,
+                                        session=current_session,
+                                        trend=trend,
+                                        timestamp=timestamp,
+                                        phase='counter-trend'
+                                    )
+                                else:
+                                    print(f"   ⚠️  همه تارگت‌ها خیلی دور هستند (>{config.MAX_TARGET_DISTANCE*100:.0f}%) - معامله نکن")
                             else:
-                                print(f"   ⚠️  همه تارگت‌ها خیلی دور هستند (>{config.MAX_TARGET_DISTANCE*100:.0f}%) - معامله نکن")
+                                print(f"   ⚠️  هیچ تارگتی در دو سشن قبلی یافت نشد")
 
                     # ریست کردن وضعیت overlap
                     self.was_in_overlap = False
@@ -613,6 +746,15 @@ class SessionBacktest:
         if current_session and len(session_data) > 0:
             session_df = pd.DataFrame.from_dict(session_data, orient='index')
             self.swing_manager.update_session_swings(current_session, session_df)
+
+            # ذخیره swings در تاریخچه
+            if current_session in self.swing_manager.session_swings:
+                swings = self.swing_manager.session_swings[current_session]
+                self.session_history.append({
+                    'session': current_session,
+                    'swings': swings
+                })
+
             session_count += 1
 
         print(f"\n📊 مجموع سشن‌های پردازش شده: {session_count}")
