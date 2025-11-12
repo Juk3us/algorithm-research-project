@@ -61,16 +61,32 @@ class SessionBacktest:
         # تاریخچه سشن‌ها برای گرفتن swings از دو سشن قبل
         self.session_history = []  # هر کدام: {'session': 'tokyo', 'swings': {...}}
 
-        # راه‌اندازی صرافی
-        # سعی برای استفاده از صرافی‌های مختلف
-        self.exchange = None
+        # سوئینگ‌هایی که گرفته شده‌اند (captured)
+        self.captured_swings = set()  # قیمت‌های سوئینگ‌هایی که به آنها رسیده‌ایم
 
-        # اگر symbol شامل AUD/USD یا جفت‌ارزهای فارکس باشد
-        # از داده‌های شبیه‌سازی استفاده کن
-        if 'AUD' in symbol or 'EUR' in symbol or 'GBP' in symbol:
-            print(f"⚠️  {symbol} یک جفت‌ارز فارکس است")
-            print("⚠️  استفاده از داده‌های شبیه‌سازی شده")
-            self.exchange = None
+        # راه‌اندازی صرافی/OANDA
+        self.exchange = None
+        self.oanda_api = None
+
+        # اگر symbol جفت‌ارز فارکس است → سعی برای اتصال به OANDA
+        if '/' in symbol and any(curr in symbol for curr in ['AUD', 'EUR', 'GBP', 'USD', 'JPY', 'CHF', 'CAD', 'NZD']):
+            try:
+                print(f"🔌 تلاش برای اتصال به OANDA برای {symbol}...")
+                from oanda_api import OandaAPI
+
+                # توکن OANDA
+                oanda_token = 'dd81e6f027e604f8f213ee371aff985acb-91d76fd9d01e79cd02632684a06d7b89'
+                self.oanda_api = OandaAPI(oanda_token, environment='practice')
+
+                if self.oanda_api.test_connection():
+                    print(f"✅ اتصال به OANDA برقرار شد")
+                else:
+                    print("⚠️  نتوانستیم به OANDA متصل شویم - استفاده از داده‌های شبیه‌سازی")
+                    self.oanda_api = None
+            except Exception as e:
+                print(f"⚠️  خطا در اتصال به OANDA: {e}")
+                print("⚠️  استفاده از داده‌های شبیه‌سازی شده")
+                self.oanda_api = None
         else:
             # برای ارزهای دیجیتال از KuCoin استفاده کن
             try:
@@ -101,8 +117,29 @@ class SessionBacktest:
         """
         print(f"\n📥 دریافت داده‌های {days} روز گذشته...")
 
-        # اگر صرافی متصل است، از API استفاده کن
-        if self.exchange:
+        # اگر OANDA متصل است، از OANDA API استفاده کن
+        if self.oanda_api:
+            try:
+                # تبدیل symbol به فرمت OANDA (AUD/USD → AUD_USD)
+                oanda_instrument = self.symbol.replace('/', '_')
+
+                # محاسبه تعداد کندل‌ها (H1 = 24 کندل در روز)
+                count = days * 24
+
+                # دریافت داده‌ها از OANDA
+                df = self.oanda_api.fetch_candles(oanda_instrument, 'H1', count)
+
+                if df is not None and len(df) > 0:
+                    return df
+                else:
+                    print("🔄 داده‌ای از OANDA دریافت نشد - استفاده از داده‌های شبیه‌سازی...")
+
+            except Exception as e:
+                print(f"⚠️  خطا در دریافت داده‌های OANDA: {e}")
+                print("🔄 استفاده از داده‌های شبیه‌سازی شده...")
+
+        # اگر صرافی کریپتو متصل است، از API استفاده کن
+        elif self.exchange:
             try:
                 # محاسبه timestamp
                 since = int((datetime.now() - timedelta(days=days)).timestamp() * 1000)
@@ -300,6 +337,8 @@ class SessionBacktest:
             لیست قیمت‌های تارگت (مرتب شده)
         """
         targets = []
+        total_swings = 0
+        filtered_swings = 0
 
         # بررسی دو سشن آخر
         sessions_to_check = self.session_history[-2:] if len(self.session_history) >= 2 else self.session_history
@@ -308,15 +347,28 @@ class SessionBacktest:
             swings = session_data.get('swings', {})
 
             if signal == 'sell':
-                # برای فروش: همه Lows
+                # برای فروش: همه Lows (فقط اگر گرفته نشده باشند)
                 swing_lows = swings.get('lows', [])
                 for swing in swing_lows:
-                    targets.append(swing['price'])
+                    total_swings += 1
+                    price = swing['price']
+                    if price not in self.captured_swings:
+                        targets.append(price)
+                    else:
+                        filtered_swings += 1
             else:  # buy
-                # برای خرید: همه Highs
+                # برای خرید: همه Highs (فقط اگر گرفته نشده باشند)
                 swing_highs = swings.get('highs', [])
                 for swing in swing_highs:
-                    targets.append(swing['price'])
+                    total_swings += 1
+                    price = swing['price']
+                    if price not in self.captured_swings:
+                        targets.append(price)
+                    else:
+                        filtered_swings += 1
+
+        if filtered_swings > 0:
+            print(f"   🔍 فیلتر سوئینگ‌ها: {total_swings} کل → {len(targets)} باقی‌مانده ({filtered_swings} گرفته شده)")
 
         # مرتب‌سازی
         if signal == 'sell':
@@ -511,6 +563,10 @@ class SessionBacktest:
         if won:
             self.winning_trades += 1
             self.total_profit += pnl
+            # ثبت سوئینگ گرفته شده
+            target_price = position['target_price']
+            self.captured_swings.add(target_price)
+            print(f"   📌 سوئینگ ${target_price:.5f} گرفته شد (کل: {len(self.captured_swings)})")
         else:
             self.losing_trades += 1
             self.total_loss += abs(pnl)
