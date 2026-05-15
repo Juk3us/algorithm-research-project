@@ -58,7 +58,8 @@
 ## فایل‌های پروژه
 
 ### فایل‌های سرور
-- **mikrotik-vpn-config.rsc**: فایل کانفیگ اصلی MikroTik
+- **mikrotik-vpn-config.rsc**: فایل کانفیگ اصلی MikroTik (با توضیحات کامل)
+- **ALL-COMMANDS.txt**: تمام دستورات یکجا (آماده کپی-پیست مستقیم)
 - **INSTALLATION-GUIDE.md**: راهنمای کامل نصب و پیکربندی (فارسی)
 - **README.md**: این فایل
 
